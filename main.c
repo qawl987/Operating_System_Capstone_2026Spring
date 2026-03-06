@@ -1,7 +1,50 @@
+#include <stdarg.h>
 extern char uart_getc(void);
 extern void uart_putc(char c);
 extern void uart_puts(const char* s);
 extern void uart_hex(unsigned long h);
+
+void printf(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt); // Initialize the argument list
+
+    while (*fmt != '\0') {
+        if (*fmt == '%') {
+            fmt++; // Skip the '%'
+            switch (*fmt) {
+                case 's': {
+                    char *s = va_arg(args, char *);
+                    uart_puts(s);
+                    break;
+                }
+                case 'c': {
+                    char c = (char)va_arg(args, int);
+                    uart_putc(c);
+                    break;
+                }
+                case 'x': {
+                    unsigned long x = va_arg(args, unsigned long);
+                    uart_hex(x);
+                    break;
+                }
+                case '%': {
+                    uart_putc('%');
+                    break;
+                }
+                default: {
+                    uart_putc('%');
+                    uart_putc(*fmt);
+                    break;
+                }
+            }
+        } else {
+            uart_putc(*fmt);
+        }
+        fmt++; // Move to the next character
+    }
+    
+    va_end(args);
+}
 
 #define SBI_EXT_BASE      0x10
 
@@ -54,7 +97,6 @@ struct sbiret sbi_ecall(int ext,
  * with the major number encoded in the next 7 bits. Bit 31 must be 0.
  */
 long sbi_get_spec_version(void) {
-    // TODO: Implement this function
     struct sbiret result = sbi_ecall(SBI_EXT_BASE, SBI_EXT_BASE_GET_SPEC_VERSION, 0, 0, 0, 0, 0, 0);
     if (result.error) {
         return result.error;
@@ -63,7 +105,6 @@ long sbi_get_spec_version(void) {
 }
 
 long sbi_get_impl_id() {
-    // TODO: Implement this function
     struct sbiret result = sbi_ecall(SBI_EXT_BASE, SBI_EXT_BASE_GET_IMP_ID, 0, 0, 0, 0, 0, 0);
     if (result.error) {
         return result.error;
@@ -72,7 +113,6 @@ long sbi_get_impl_id() {
 }
 
 long sbi_get_impl_version() {
-    // TODO: Implement this function
     struct sbiret result = sbi_ecall(SBI_EXT_BASE, SBI_EXT_BASE_GET_IMP_VERSION, 0, 0, 0, 0, 0, 0);
     if (result.error) {
         return result.error;
@@ -85,7 +125,7 @@ int strcmp(const char *s1, const char *s2) {
         s1++;
         s2++;
     }
-    // 回傳相差的值，若字串一樣，最後相減會是 0
+    // Return the difference; if the strings are identical, the result is 0
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
@@ -96,61 +136,49 @@ void start_kernel() {
     int cmd_idx = 0;
 
     while (1) {
-        // 1. 印出提示字元 (每次新指令只印一次)
         uart_puts("opi-rv2> ");
-        cmd_idx = 0; // 重置緩衝區索引
+        cmd_idx = 0;
 
-        // 2. 內層迴圈：接收輸入直到按下 Enter
+        // 2. Inner loop: receive input until Enter is pressed
         while (1) {
             char c = uart_getc();
 
             if (c == '\r' || c == '\n') {
-                // 收到 Enter：換行，並在字串結尾補上 '\0' 形成合法 C 字串
+                // Enter received: print newline and append '\0' to form a valid C string
                 uart_puts("\r\n");
                 cmd_buf[cmd_idx] = '\0';
-                break; // 跳出內層迴圈，準備處理指令
+                break;
             } 
             else if (c == '\b' || c == '\x7f') {
-                // 收到退格鍵 (Backspace 或 Delete)
+                // Backspace or Delete received
                 if (cmd_idx > 0) {
                     cmd_idx--;
-                    // 終端機游標退後一格，印出空白蓋掉原本的字，再退後一格
+                    // Move cursor back, print space to overwrite, move back again
                     uart_puts("\b \b"); 
                 }
             } 
             else if (cmd_idx < MAX_CMD_LEN - 1) {
-                // 其他正常字元：存入緩衝區並回顯 (Echo)
                 cmd_buf[cmd_idx++] = c;
                 uart_putc(c);
             }
         }
 
-        // 3. 指令處理階段 (跳出內層迴圈後)
         if (cmd_idx > 0) {
-            // 這裡可以檢查 cmd_buf 裡面的字串
             if (strcmp(cmd_buf, "help") == 0) {
-                uart_puts("Available commands:\n");
-                uart_puts("  help  - show all commands.\n");
-                uart_puts("  hello - print hello world.\n");
-                uart_puts("  info  - print system info.\n");
+                printf("Available commands:\r\n"
+                       "  help  - show all commands.\r\n"
+                       "  hello - print hello world.\r\n"
+                       "  info  - print system info.\r\n");
             } else if (strcmp(cmd_buf, "hello world") == 0){
-                uart_puts("Hello world.\n");
+                printf("Hello world.\r\n");
             } else if (strcmp(cmd_buf, "info") == 0){
-                uart_puts("System information:\n");
-                uart_puts("  OpenSBI specification version:");
-                uart_hex(sbi_get_spec_version());
-                uart_puts("\r\n");
-                uart_puts("  implementation ID:");
-                uart_hex(sbi_get_impl_id());
-                uart_puts("\r\n");
-                uart_puts("  implementation version:");
-                uart_hex(sbi_get_impl_version());
-                uart_puts("\r\n");
+                printf("System information:\r\n");
+                printf("  OpenSBI specification version: %x\r\n", sbi_get_spec_version());
+                printf("  implementation ID: %x\r\n", sbi_get_impl_id());
+                printf("  implementation version: %x\r\n", sbi_get_impl_version());
             } else {
-                uart_puts("Unknown command: ");
-                uart_puts(cmd_buf);
-                uart_puts("\r\n");
-                uart_puts("Use help to get commands\n");
+                printf("Unknown command: %s\r\n", cmd_buf);
+                printf("Use help to get commands\r\n");
             }
         }
     }
