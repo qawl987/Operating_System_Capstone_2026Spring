@@ -1,0 +1,6 @@
+*.elf
+*.o
+kernel
+kernel.bin
+kernel.fit
+kernel.elf
