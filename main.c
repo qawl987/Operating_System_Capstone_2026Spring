@@ -8,6 +8,8 @@ extern void load_kernel(void);
 extern int fdt_path_offset(const void *fdt, const char *target_path);
 extern const void *fdt_getprop(const void *fdt, int nodeoffset,
                                const char *name, int *lenp);
+extern void initrd_list(const void *start, const void *end);
+extern void initrd_cat(const void *start, const void *end, const char *filename);
 
 #define SBI_EXT_BASE 0x10
 
@@ -95,7 +97,34 @@ void start_kernel(void *dtb_base) {
         }
     }
 
+    // Parse initrd start and end addresses from DTB
+    unsigned long initrd_start_addr = 0;
+    unsigned long initrd_end_addr = 0;
+    offset = fdt_path_offset(dtb_base, "/chosen");
+    if (offset >= 0) {
+        int len;
+        const void *reg = fdt_getprop(dtb_base, offset, "linux,initrd-start", &len);
+        if (reg) {
+            if (len >= 8) {
+                initrd_start_addr = bswap64(*(const uint64_t *)reg);
+            } else if (len >= 4) {
+                initrd_start_addr = bswap32(*(const uint32_t *)reg);
+            }
+        }
+        reg = fdt_getprop(dtb_base, offset, "linux,initrd-end", &len);
+        if (reg) {
+            if (len >= 8) {
+                initrd_end_addr = bswap64(*(const uint64_t *)reg);
+            } else if (len >= 4) {
+                initrd_end_addr = bswap32(*(const uint32_t *)reg);
+            }
+        }
+    }
+
     uart_puts("\nStarting kernel ...\n");
+    if (initrd_start_addr && initrd_end_addr) {
+        printf("initrd: %x - %x\n", initrd_start_addr, initrd_end_addr);
+    }
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
     int cmd_idx = 0;
@@ -131,9 +160,12 @@ void start_kernel(void *dtb_base) {
         if (cmd_idx > 0) {
             if (strcmp(cmd_buf, "help") == 0) {
                 printf("Available commands:\r\n"
-                       "  help  - show all commands.\r\n"
-                       "  hello - print hello world.\r\n"
-                       "  info  - print system info.\r\n");
+                       "  help      - show all commands.\r\n"
+                       "  hello     - print hello world.\r\n"
+                       "  info      - print system info.\r\n"
+                       "  load      - load kernel via UART.\r\n"
+                       "  ls        - list files in initrd.\r\n"
+                       "  cat <file>- display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
                 printf("Hello world.\r\n");
             } else if (strcmp(cmd_buf, "info") == 0) {
@@ -146,7 +178,18 @@ void start_kernel(void *dtb_base) {
             } else if (strcmp(cmd_buf, "load") == 0) {
                 load_kernel();
             } else if (strcmp(cmd_buf, "ls") == 0) {
-                load_kernel();
+                if (initrd_start_addr && initrd_end_addr) {
+                    initrd_list((void *)initrd_start_addr, (void *)initrd_end_addr);
+                } else {
+                    printf("No initrd loaded.\r\n");
+                }
+            } else if (strncmp(cmd_buf, "cat ", 4) == 0) {
+                if (initrd_start_addr && initrd_end_addr) {
+                    const char *filename = cmd_buf + 4;
+                    initrd_cat((void *)initrd_start_addr, (void *)initrd_end_addr, filename);
+                } else {
+                    printf("No initrd loaded.\r\n");
+                }
             } else {
                 printf("Unknown command: %s\r\n", cmd_buf);
                 printf("Use help to get commands\r\n");

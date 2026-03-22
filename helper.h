@@ -16,6 +16,10 @@ uint64_t bswap64(uint64_t x);
 
 // Alignment helper
 const void *align_up(const void *ptr, size_t align);
+size_t align_up_val(size_t val, size_t align);
+
+// Hex string to integer
+int hextoi(const char *s, int n);
 
 // printf declaration
 void printf(const char *fmt, ...);

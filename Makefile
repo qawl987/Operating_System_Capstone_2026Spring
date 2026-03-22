@@ -20,8 +20,14 @@ build_pi: clean
 run: build
 	$(QEMU) -M virt -m 8G -kernel $(TARGET) -display none -serial stdio
 
+run_initrd: build
+	$(QEMU) -M virt -m 8G -kernel $(TARGET) -initrd initramfs.cpio -display none -serial stdio
+
 run_pty: build
 	$(QEMU) -M virt -m 8G -kernel $(TARGET) -display none -serial pty
+
+run_pty_initrd: build
+	$(QEMU) -M virt -m 8G -kernel $(TARGET) -initrd initramfs.cpio -display none -serial pty
 
 deploy: build_pi
 	@echo "開始部署 kernel.fit 到 SD 卡..."

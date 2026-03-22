@@ -65,6 +65,26 @@ const void *align_up(const void *ptr, size_t align) {
     return (const void *)(((uintptr_t)ptr + align - 1) & ~(align - 1));
 }
 
+size_t align_up_val(size_t val, size_t align) {
+    return (val + align - 1) & ~(align - 1);
+}
+
+int hextoi(const char *s, int n) {
+    int r = 0;
+    while (n-- > 0) {
+        r = r << 4;
+        if (*s >= 'A' && *s <= 'F')
+            r += *s++ - 'A' + 10;
+        else if (*s >= 'a' && *s <= 'f')
+            r += *s++ - 'a' + 10;
+        else if (*s >= '0' && *s <= '9')
+            r += *s++ - '0';
+        else
+            s++;
+    }
+    return r;
+}
+
 static void uart_dec(int num) {
     if (num == 0) {
         uart_putc('0');
