@@ -24,6 +24,13 @@ char uart_getc() {
     return c == '\r' ? '\n' : c;
 }
 
+// Raw version without CR->LF conversion (for binary data)
+char uart_getc_raw() {
+    while ((*uart_lsr() & LSR_DR) == 0)
+        ;
+    return (char)*uart_rbr();
+}
+
 void uart_putc(char c) {
     if (c == '\n')
         uart_putc('\r');

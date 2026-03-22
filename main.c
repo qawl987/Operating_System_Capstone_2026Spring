@@ -4,7 +4,7 @@ extern char uart_getc(void);
 extern void uart_putc(char c);
 extern void uart_puts(const char *s);
 extern void uart_hex(unsigned long h);
-extern void load_kernel(void);
+extern void load_kernel(void *dtb);
 extern int fdt_path_offset(const void *fdt, const char *target_path);
 extern const void *fdt_getprop(const void *fdt, int nodeoffset,
                                const char *name, int *lenp);
@@ -176,7 +176,7 @@ void start_kernel(void *dtb_base) {
                 printf("  implementation version: %x\r\n",
                        sbi_get_impl_version());
             } else if (strcmp(cmd_buf, "load") == 0) {
-                load_kernel();
+                load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "ls") == 0) {
                 if (initrd_start_addr && initrd_end_addr) {
                     initrd_list((void *)initrd_start_addr, (void *)initrd_end_addr);

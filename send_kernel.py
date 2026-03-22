@@ -36,8 +36,15 @@ def main():
         with open(tty_dev, "wb", buffering=0) as tty:
             # 寫入 Header
             tty.write(header)
-            # 寫入 Kernel Data
-            tty.write(kernel_data)
+            time.sleep(0.1)  # Give bootloader time to process header
+            
+            # 寫入 Kernel Data (in chunks to avoid buffer overflow)
+            chunk_size = 256
+            for i in range(0, len(kernel_data), chunk_size):
+                chunk = kernel_data[i:i+chunk_size]
+                tty.write(chunk)
+                time.sleep(0.01)  # Small delay between chunks
+                
         print("傳送完成！")
     except PermissionError:
         print(f"權限不足：無法寫入 {tty_dev}。請嘗試使用 sudo，或更改 /dev/pts/X 的權限。")

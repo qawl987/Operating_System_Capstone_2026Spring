@@ -1,7 +1,7 @@
 #include <stdint.h>
 
 // 宣告在其他檔案實作的 UART 函式
-extern char uart_getc(void);
+extern char uart_getc_raw(void);
 extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void printf(const char *fmt, ...);
@@ -11,7 +11,7 @@ extern void printf(const char *fmt, ...);
 #define KERNEL_LOAD_ADDR 0x82000000ULL
 #define BOOT_MAGIC 0x544F4F42
 
-void load_kernel(void) {
+void load_kernel(void *dtb) {
     uart_puts("Waiting for kernel image via UART...\r\n");
 
     uint32_t magic = 0;
@@ -21,7 +21,7 @@ void load_kernel(void) {
     // Python 端用 '<II' 封裝，代表是 Little-Endian
     unsigned char *magic_ptr = (unsigned char *)&magic;
     for (int i = 0; i < 4; i++) {
-        magic_ptr[i] = uart_getc();
+        magic_ptr[i] = uart_getc_raw();
     }
 
     // 檢查 Magic Number 是否正確
@@ -33,7 +33,7 @@ void load_kernel(void) {
     // 2. 讀取 4 bytes 的 Kernel Size
     unsigned char *size_ptr = (unsigned char *)&size;
     for (int i = 0; i < 4; i++) {
-        size_ptr[i] = uart_getc();
+        size_ptr[i] = uart_getc_raw();
     }
 
     printf("Magic matched! Kernel size: %d bytes\r\n", size);
@@ -52,7 +52,7 @@ void load_kernel(void) {
     uart_puts("] 0%");
 
     for (uint32_t i = 0; i < size; i++) {
-        kernel_mem[i] = uart_getc();
+        kernel_mem[i] = uart_getc_raw();
 
         // 計算當前進度百分比
         int percent = (int)(((uint64_t)(i + 1) * 100) / size);
@@ -78,7 +78,9 @@ void load_kernel(void) {
     uart_puts("Jumping to kernel...\r\n");
 
     // 4. 交出控制權：跳轉到 Kernel 載入的位址
-    // 將該位址轉型成一個不接收參數也無回傳值的函式指標，然後呼叫它
+    // 新 kernel 的 _start 期望 DTB 地址在 a1 寄存器中
+    register unsigned long a1_dtb asm("a1") = (unsigned long)dtb;
     void (*kernel_entry)(void) = (void (*)(void))KERNEL_LOAD_ADDR;
+    asm volatile("" : : "r"(a1_dtb));  // 確保 a1 被設置
     kernel_entry();
 }
