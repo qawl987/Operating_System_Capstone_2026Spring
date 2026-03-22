@@ -1,9 +1,24 @@
 #include <stdarg.h>
+extern void uart_init(unsigned long base);
 extern char uart_getc(void);
 extern void uart_putc(char c);
 extern void uart_puts(const char *s);
 extern void uart_hex(unsigned long h);
 extern void load_kernel(void);
+extern int fdt_path_offset(const void *fdt, const char *target_path);
+extern const void *fdt_getprop(const void *fdt, int nodeoffset,
+                               const char *name, int *lenp);
+
+static inline unsigned long bswap64(unsigned long x) {
+    return ((x & 0x00000000000000FFULL) << 56) |
+           ((x & 0x000000000000FF00ULL) << 40) |
+           ((x & 0x0000000000FF0000ULL) << 24) |
+           ((x & 0x00000000FF000000ULL) << 8) |
+           ((x & 0x000000FF00000000ULL) >> 8) |
+           ((x & 0x0000FF0000000000ULL) >> 24) |
+           ((x & 0x00FF000000000000ULL) >> 40) |
+           ((x & 0xFF00000000000000ULL) >> 56);
+}
 
 void uart_dec(int num) {
     if (num == 0) {
@@ -166,9 +181,20 @@ int strcmp(const char *s1, const char *s2) {
     return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
 
-void start_kernel() {
+void start_kernel(void *dtb_base) {
+    // Parse DTB to get UART base address and initialize UART
+    // QEMU uses "/soc/serial", OrangePi RV2 uses "/soc/serial"
+    int offset = fdt_path_offset(dtb_base, "/soc/serial");
+    if (offset >= 0) {
+        int len;
+        const void *reg = fdt_getprop(dtb_base, offset, "reg", &len);
+        if (reg && len >= 8) {
+            unsigned long uart_addr = bswap64(*(const unsigned long *)reg);
+            uart_init(uart_addr);
+        }
+    }
+
     uart_puts("\nStarting kernel ...\n");
-    // uart_puts("\nStarting kernel [V2] via UART...\n");
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
     int cmd_idx = 0;
@@ -217,6 +243,8 @@ void start_kernel() {
                 printf("  implementation version: %x\r\n",
                        sbi_get_impl_version());
             } else if (strcmp(cmd_buf, "load") == 0) {
+                load_kernel();
+            } else if (strcmp(cmd_buf, "ls") == 0) {
                 load_kernel();
             } else {
                 printf("Unknown command: %s\r\n", cmd_buf);

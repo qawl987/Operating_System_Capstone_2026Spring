@@ -4,3 +4,4 @@ kernel
 kernel.bin
 kernel.fit
 kernel.elf
+qemu.dtb

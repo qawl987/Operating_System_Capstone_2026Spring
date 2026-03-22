@@ -1,14 +1,26 @@
-#define UART_BASE 0x10000000UL
-#define UART_RBR (unsigned char *)(UART_BASE + 0x0)
-#define UART_THR (unsigned char *)(UART_BASE + 0x0)
-#define UART_LSR (unsigned char *)(UART_BASE + 0x5)
 #define LSR_DR (1 << 0)
 #define LSR_TDRQ (1 << 5)
 
+static unsigned long uart_base = 0x10000000UL; // Default value
+
+void uart_init(unsigned long base) { uart_base = base; }
+
+static inline volatile unsigned char *uart_rbr(void) {
+    return (volatile unsigned char *)(uart_base + 0x0);
+}
+
+static inline volatile unsigned char *uart_thr(void) {
+    return (volatile unsigned char *)(uart_base + 0x0);
+}
+
+static inline volatile unsigned char *uart_lsr(void) {
+    return (volatile unsigned char *)(uart_base + 0x5);
+}
+
 char uart_getc() {
-    while ((*UART_LSR & LSR_DR) == 0)
+    while ((*uart_lsr() & LSR_DR) == 0)
         ;
-    char c = (char)*UART_RBR;
+    char c = (char)*uart_rbr();
     return c == '\r' ? '\n' : c;
 }
 
@@ -16,9 +28,9 @@ void uart_putc(char c) {
     if (c == '\n')
         uart_putc('\r');
 
-    while ((*UART_LSR & LSR_TDRQ) == 0)
+    while ((*uart_lsr() & LSR_TDRQ) == 0)
         ;
-    *UART_THR = c;
+    *uart_thr() = c;
 }
 
 void uart_puts(const char *s) {
