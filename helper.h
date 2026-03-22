@@ -17,4 +17,7 @@ uint64_t bswap64(uint64_t x);
 // Alignment helper
 const void *align_up(const void *ptr, size_t align);
 
+// printf declaration
+void printf(const char *fmt, ...);
+
 #endif // HELPER_H

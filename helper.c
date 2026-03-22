@@ -1,4 +1,10 @@
 #include "helper.h"
+#include <stdarg.h>
+
+// UART functions (defined in uart.c)
+extern void uart_putc(char c);
+extern void uart_puts(const char *s);
+extern void uart_hex(unsigned long h);
 
 size_t strlen(const char *s) {
     size_t len = 0;
@@ -57,4 +63,79 @@ uint64_t bswap64(uint64_t x) {
 
 const void *align_up(const void *ptr, size_t align) {
     return (const void *)(((uintptr_t)ptr + align - 1) & ~(align - 1));
+}
+
+static void uart_dec(int num) {
+    if (num == 0) {
+        uart_putc('0');
+        return;
+    }
+
+    unsigned int unum;
+    if (num < 0) {
+        uart_putc('-');
+        unum = (unsigned int)(-num);
+    } else {
+        unum = (unsigned int)num;
+    }
+
+    char buf[16];
+    int i = 0;
+
+    while (unum > 0) {
+        buf[i++] = (unum % 10) + '0';
+        unum /= 10;
+    }
+
+    while (i > 0) {
+        i--;
+        uart_putc(buf[i]);
+    }
+}
+
+void printf(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+
+    while (*fmt != '\0') {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+            case 's': {
+                char *s = va_arg(args, char *);
+                uart_puts(s);
+                break;
+            }
+            case 'c': {
+                char c = (char)va_arg(args, int);
+                uart_putc(c);
+                break;
+            }
+            case 'x': {
+                unsigned long x = va_arg(args, unsigned long);
+                uart_hex(x);
+                break;
+            }
+            case 'd': {
+                int d = va_arg(args, int);
+                uart_dec(d);
+                break;
+            }
+            case '%': {
+                uart_putc('%');
+                break;
+            }
+            default: {
+                uart_putc('%');
+                uart_putc(*fmt);
+                break;
+            }
+            }
+        } else {
+            uart_putc(*fmt);
+        }
+        fmt++;
+    }
+
+    va_end(args);
 }

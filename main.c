@@ -1,5 +1,4 @@
 #include "helper.h"
-#include <stdarg.h>
 extern void uart_init(unsigned long base);
 extern char uart_getc(void);
 extern void uart_putc(char c);
@@ -9,85 +8,6 @@ extern void load_kernel(void);
 extern int fdt_path_offset(const void *fdt, const char *target_path);
 extern const void *fdt_getprop(const void *fdt, int nodeoffset,
                                const char *name, int *lenp);
-
-void uart_dec(int num) {
-    if (num == 0) {
-        uart_putc('0');
-        return;
-    }
-
-    // 處理負數
-    unsigned int unum;
-    if (num < 0) {
-        uart_putc('-');
-        unum = (unsigned int)(-num);
-    } else {
-        unum = (unsigned int)num;
-    }
-
-    // 32 位元整數最多 10 個位數，加上 sign，給 16 個 bytes 的 buffer 絕對夠用
-    char buf[16];
-    int i = 0;
-
-    // 依序取出個位數、十位數、百位數...
-    while (unum > 0) {
-        buf[i++] = (unum % 10) + '0'; // 加上 '0' 轉換成 ASCII 字元
-        unum /= 10;
-    }
-
-    // 因為是從低位數開始存的，所以要反過來印
-    while (i > 0) {
-        i--;
-        uart_putc(buf[i]);
-    }
-}
-
-void printf(const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt); // Initialize the argument list
-
-    while (*fmt != '\0') {
-        if (*fmt == '%') {
-            fmt++; // Skip the '%'
-            switch (*fmt) {
-            case 's': {
-                char *s = va_arg(args, char *);
-                uart_puts(s);
-                break;
-            }
-            case 'c': {
-                char c = (char)va_arg(args, int);
-                uart_putc(c);
-                break;
-            }
-            case 'x': {
-                unsigned long x = va_arg(args, unsigned long);
-                uart_hex(x);
-                break;
-            }
-            case 'd': {
-                int d = va_arg(args, int);
-                uart_dec(d);
-                break;
-            }
-            case '%': {
-                uart_putc('%');
-                break;
-            }
-            default: {
-                uart_putc('%');
-                uart_putc(*fmt);
-                break;
-            }
-            }
-        } else {
-            uart_putc(*fmt);
-        }
-        fmt++; // Move to the next character
-    }
-
-    va_end(args);
-}
 
 #define SBI_EXT_BASE 0x10
 
