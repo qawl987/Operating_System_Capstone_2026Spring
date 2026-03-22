@@ -2,7 +2,7 @@ RISCV_GNU ?= riscv64-unknown-elf
 CC = $(RISCV_GNU)-gcc
 LD = $(RISCV_GNU)-ld
 OBJCOPY = $(RISCV_GNU)-objcopy
-CFLAGS = -mcmodel=medany -ffreestanding -nostdlib -g -Wall
+CFLAGS = -mcmodel=medany -ffreestanding -nostdlib -g -Wall -fPIE
 QEMU ?= qemu-system-riscv64
 TARGET = kernel
 

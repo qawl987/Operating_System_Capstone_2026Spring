@@ -6,9 +6,10 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void printf(const char *fmt, ...);
 
-// 根據 Lab 說明，OrangePi RV2 載入位址是 0x20000000
-// (如果你要在 QEMU 上測試，記得改成 0x82000000)
-#define KERNEL_LOAD_ADDR 0x82000000ULL
+// 根據 Lab 說明，OrangePi RV2 載入位址是 0x00200000
+// QEMU 的標準入口點是 0x80200000
+// 由於 bootloader 已自我重定位到 0x84000000，可以載入到標準位址
+#define KERNEL_LOAD_ADDR 0x80200000ULL
 #define BOOT_MAGIC 0x544F4F42
 
 void load_kernel(void *dtb) {
