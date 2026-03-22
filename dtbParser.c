@@ -1,5 +1,4 @@
-#include <stddef.h>
-#include <stdint.h>
+#include "helper.h"
 
 #define FDT_BEGIN_NODE 0x00000001
 #define FDT_END_NODE 0x00000002
@@ -19,42 +18,6 @@ struct fdt_header {
     uint32_t size_dt_strings;
     uint32_t size_dt_struct;
 };
-
-static inline uint32_t bswap32(uint32_t x) {
-    return ((x & 0x000000FFU) << 24) |
-           ((x & 0x0000FF00U) << 8)  |
-           ((x & 0x00FF0000U) >> 8)  |
-           ((x & 0xFF000000U) >> 24);
-}
-
-static inline uint64_t bswap64(uint64_t x) {
-    return ((x & 0x00000000000000FFULL) << 56) |
-           ((x & 0x000000000000FF00ULL) << 40) |
-           ((x & 0x0000000000FF0000ULL) << 24) |
-           ((x & 0x00000000FF000000ULL) << 8)  |
-           ((x & 0x000000FF00000000ULL) >> 8)  |
-           ((x & 0x0000FF0000000000ULL) >> 24) |
-           ((x & 0x00FF000000000000ULL) >> 40) |
-           ((x & 0xFF00000000000000ULL) >> 56);
-}
-
-static inline const void *align_up(const void *ptr, size_t align) {
-    return (const void *)(((uintptr_t)ptr + align - 1) & ~(align - 1));
-}
-
-static size_t my_strlen(const char *s) {
-    size_t len = 0;
-    while (*s++) len++;
-    return len;
-}
-
-static int my_strcmp(const char *s1, const char *s2) {
-    while (*s1 != '\0' && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
-}
 
 struct path {
     char path[64];
@@ -144,7 +107,7 @@ int fdt_path_offset(const void *fdt, const char *target_path) {
                 return (int)((const char *)node_base_ptr - (const char *)fdt);
             }
 
-            p = (const char *)align_up(p + my_strlen(name) + 1, 4);
+            p = (const char *)align_up(p + strlen(name) + 1, 4);
 
         } else if (tag == FDT_PROP) {
             p += 4;
@@ -183,7 +146,7 @@ const void *fdt_getprop(const void *fdt, int nodeoffset, const char *name,
     if (tag != FDT_BEGIN_NODE)
         return NULL;
     p += 4;                                           // 跳過 Tag
-    p = (const char *)align_up(p + my_strlen(p) + 1, 4); // 跳過 Node Name 並對齊
+    p = (const char *)align_up(p + strlen(p) + 1, 4); // 跳過 Node Name 並對齊
 
     while (1) {
         uint32_t tag = bswap32(*(uint32_t *)p);
@@ -194,7 +157,7 @@ const void *fdt_getprop(const void *fdt, int nodeoffset, const char *name,
             uint32_t name_off = bswap32(*(uint32_t *)p);
             p += 4; // data
             const char *prop_name = strings_base + name_off;
-            if (my_strcmp(prop_name, name) == 0) {
+            if (strcmp(prop_name, name) == 0) {
                 if (lenp)
                     *lenp = (int)prop_len;
                 return p;

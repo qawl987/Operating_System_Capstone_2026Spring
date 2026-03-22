@@ -1,3 +1,4 @@
+#include "helper.h"
 #include <stdarg.h>
 extern void uart_init(unsigned long base);
 extern char uart_getc(void);
@@ -8,17 +9,6 @@ extern void load_kernel(void);
 extern int fdt_path_offset(const void *fdt, const char *target_path);
 extern const void *fdt_getprop(const void *fdt, int nodeoffset,
                                const char *name, int *lenp);
-
-static inline unsigned long bswap64(unsigned long x) {
-    return ((x & 0x00000000000000FFULL) << 56) |
-           ((x & 0x000000000000FF00ULL) << 40) |
-           ((x & 0x0000000000FF0000ULL) << 24) |
-           ((x & 0x00000000FF000000ULL) << 8) |
-           ((x & 0x000000FF00000000ULL) >> 8) |
-           ((x & 0x0000FF0000000000ULL) >> 24) |
-           ((x & 0x00FF000000000000ULL) >> 40) |
-           ((x & 0xFF00000000000000ULL) >> 56);
-}
 
 void uart_dec(int num) {
     if (num == 0) {
@@ -170,15 +160,6 @@ long sbi_get_impl_version() {
         return result.error;
     }
     return result.value;
-}
-
-int strcmp(const char *s1, const char *s2) {
-    while (*s1 != '\0' && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    // Return the difference; if the strings are identical, the result is 0
-    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
 
 void start_kernel(void *dtb_base) {
