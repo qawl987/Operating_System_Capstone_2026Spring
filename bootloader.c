@@ -41,11 +41,37 @@ void load_kernel(void) {
 
     // 3. 讀取 Kernel 資料並寫入指定的記憶體位址
     unsigned char *kernel_mem = (unsigned char *)KERNEL_LOAD_ADDR;
+
+    // 進度條設定
+    const int bar_width = 50; // 進度條寬度
+    int last_percent = -1;
+
+    uart_puts("[");
+    for (int i = 0; i < bar_width; i++)
+        uart_putc(' ');
+    uart_puts("] 0%");
+
     for (uint32_t i = 0; i < size; i++) {
         kernel_mem[i] = uart_getc();
 
-        // 可選：每接收 1024 bytes 印出一個點，讓你知道有在動
-        // if (i % 1024 == 0) uart_putc('.');
+        // 計算當前進度百分比
+        int percent = (int)(((uint64_t)(i + 1) * 100) / size);
+
+        if (percent != last_percent) {
+            last_percent = percent;
+            int filled = (percent * bar_width) / 100;
+
+            // 回到行首重繪進度條
+            uart_putc('\r');
+            uart_putc('[');
+            for (int j = 0; j < bar_width; j++) {
+                if (j < filled)
+                    uart_putc('=');
+                else
+                    uart_putc(' ');
+            }
+            printf("] %d%%", percent);
+        }
     }
 
     uart_puts("\r\nKernel loaded successfully!\r\n");
