@@ -11,6 +11,13 @@ extern void printf(const char *fmt, ...);
 // 由於 bootloader 已自我重定位，可以載入到標準入口點
 #define KERNEL_LOAD_ADDR LOAD_ADDR
 
+// 讀取 RISC-V time CSR (需要 SBI 或直接讀取 mtime)
+// static inline uint64_t read_time(void) {
+//     uint64_t time;
+//     asm volatile("rdtime %0" : "=r"(time));
+//     return time;
+// }
+
 void load_kernel(void *dtb) {
     uart_puts("Waiting for kernel image via UART...\r\n");
 
@@ -46,6 +53,9 @@ void load_kernel(void *dtb) {
     const int bar_width = 50; // 進度條寬度
     int last_percent = -1;
 
+    // 開始計時
+    // uint64_t start_time = read_time();
+
     uart_puts("[");
     for (int i = 0; i < bar_width; i++)
         uart_putc(' ');
@@ -75,7 +85,14 @@ void load_kernel(void *dtb) {
         }
     }
 
-    uart_puts("\r\nKernel loaded successfully!\r\n");
+    // 結束計時並顯示時間
+    // uint64_t end_time = read_time();
+    // uint64_t elapsed = end_time - start_time;
+    // QEMU timer frequency is typically 10MHz, OrangePi may differ
+    // 顯示原始 ticks 和估算時間 (假設 10MHz)
+    // uint64_t ms = elapsed / 10000; // 10MHz -> ms
+    // printf("\r\nKernel loaded successfully! (Time: %d ms, %d ticks)\r\n",
+    //        (uint32_t)ms, (uint32_t)elapsed);
     uart_puts("Jumping to kernel...\r\n");
 
     // 4. 交出控制權：跳轉到 Kernel 載入的位址

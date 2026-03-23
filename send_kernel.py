@@ -43,7 +43,7 @@ def main():
             for i in range(0, len(kernel_data), chunk_size):
                 chunk = kernel_data[i:i+chunk_size]
                 tty.write(chunk)
-                time.sleep(0.01)  # Small delay between chunks
+                time.sleep(0.05)  # Increased delay to prevent buffer overflow
                 
         print("傳送完成！")
     except PermissionError:
