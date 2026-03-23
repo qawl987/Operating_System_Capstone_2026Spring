@@ -1,3 +1,4 @@
+#include "config.h"
 #include <stdint.h>
 
 // 宣告在其他檔案實作的 UART 函式
@@ -6,11 +7,9 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void printf(const char *fmt, ...);
 
-// 根據 Lab 說明，OrangePi RV2 載入位址是 0x00200000
-// QEMU 的標準入口點是 0x80200000
-// 由於 bootloader 已自我重定位到 0x84000000，可以載入到標準位址
-#define KERNEL_LOAD_ADDR 0x80200000ULL
-#define BOOT_MAGIC 0x544F4F42
+// KERNEL_LOAD_ADDR 從 config.h 取得 (LOAD_ADDR)
+// 由於 bootloader 已自我重定位，可以載入到標準入口點
+#define KERNEL_LOAD_ADDR LOAD_ADDR
 
 void load_kernel(void *dtb) {
     uart_puts("Waiting for kernel image via UART...\r\n");
@@ -82,6 +81,6 @@ void load_kernel(void *dtb) {
     // 新 kernel 的 _start 期望 DTB 地址在 a1 寄存器中
     register unsigned long a1_dtb asm("a1") = (unsigned long)dtb;
     void (*kernel_entry)(void) = (void (*)(void))KERNEL_LOAD_ADDR;
-    asm volatile("" : : "r"(a1_dtb));  // 確保 a1 被設置
+    asm volatile("" : : "r"(a1_dtb)); // 確保 a1 被設置
     kernel_entry();
 }
