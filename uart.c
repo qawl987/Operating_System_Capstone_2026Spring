@@ -1,7 +1,7 @@
 #define LSR_DR (1 << 0)
 #define LSR_TDRQ (1 << 5)
 
-static unsigned long uart_base = 0x10000000UL; // Default value
+static unsigned long uart_base = 0x10000000UL; // Default QEMU value
 
 void uart_init(unsigned long base) { uart_base = base; }
 

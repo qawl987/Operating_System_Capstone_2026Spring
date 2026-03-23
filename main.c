@@ -9,7 +9,8 @@ extern int fdt_path_offset(const void *fdt, const char *target_path);
 extern const void *fdt_getprop(const void *fdt, int nodeoffset,
                                const char *name, int *lenp);
 extern void initrd_list(const void *start, const void *end);
-extern void initrd_cat(const void *start, const void *end, const char *filename);
+extern void initrd_cat(const void *start, const void *end,
+                       const char *filename);
 
 #define SBI_EXT_BASE 0x10
 
@@ -86,8 +87,11 @@ long sbi_get_impl_version() {
 
 void start_kernel(void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
-    // QEMU uses "/soc/serial", OrangePi RV2 uses "/soc/serial"
+    // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
     int offset = fdt_path_offset(dtb_base, "/soc/serial");
+    if (offset < 0) {
+        offset = fdt_path_offset(dtb_base, "/soc/uart");
+    }
     if (offset >= 0) {
         int len;
         const void *reg = fdt_getprop(dtb_base, offset, "reg", &len);
@@ -103,7 +107,8 @@ void start_kernel(void *dtb_base) {
     offset = fdt_path_offset(dtb_base, "/chosen");
     if (offset >= 0) {
         int len;
-        const void *reg = fdt_getprop(dtb_base, offset, "linux,initrd-start", &len);
+        const void *reg =
+            fdt_getprop(dtb_base, offset, "linux,initrd-start", &len);
         if (reg) {
             if (len >= 8) {
                 initrd_start_addr = bswap64(*(const uint64_t *)reg);
@@ -179,14 +184,16 @@ void start_kernel(void *dtb_base) {
                 load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "ls") == 0) {
                 if (initrd_start_addr && initrd_end_addr) {
-                    initrd_list((void *)initrd_start_addr, (void *)initrd_end_addr);
+                    initrd_list((void *)initrd_start_addr,
+                                (void *)initrd_end_addr);
                 } else {
                     printf("No initrd loaded.\r\n");
                 }
             } else if (strncmp(cmd_buf, "cat ", 4) == 0) {
                 if (initrd_start_addr && initrd_end_addr) {
                     const char *filename = cmd_buf + 4;
-                    initrd_cat((void *)initrd_start_addr, (void *)initrd_end_addr, filename);
+                    initrd_cat((void *)initrd_start_addr,
+                               (void *)initrd_end_addr, filename);
                 } else {
                     printf("No initrd loaded.\r\n");
                 }

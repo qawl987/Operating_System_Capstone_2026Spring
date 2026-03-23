@@ -57,7 +57,8 @@ void load_kernel(void *dtb) {
         // 計算當前進度百分比
         int percent = (int)(((uint64_t)(i + 1) * 100) / size);
 
-        if (percent != last_percent) {
+        // 每 10% 更新一次進度條，減少 UART 輸出量
+        if (percent != last_percent && percent % 10 == 0) {
             last_percent = percent;
             int filled = (percent * bar_width) / 100;
 

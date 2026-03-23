@@ -19,6 +19,14 @@ SECTIONS
     
     .data : { *(.data) }
     
+    /* GOT section - needs relocation fixup */
+    .got : {
+        _got_start = .;
+        *(.got)
+        *(.got.plt)
+        _got_end = .;
+    }
+    
     .bss : {
         __bss_start = .;
         *(.sbss) *(.bss)
