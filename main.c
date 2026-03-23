@@ -25,8 +25,14 @@ void start_kernel(void *dtb_base) {
         int len;
         const void *reg = fdt_getprop(dtb_base, offset, "reg", &len);
         if (reg && len >= 8) {
-            unsigned long uart_addr = bswap64(*(const unsigned long *)reg);
+            // reg format depends on #address-cells (typically 2 for 64-bit)
+            // Each cell is 32-bit big-endian: [addr_hi, addr_lo, size_hi,
+            // size_lo]
+            const uint32_t *cells = (const uint32_t *)reg;
+            uint64_t uart_addr =
+                ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
             uart_init(uart_addr);
+            printf("UART base address: %x\n", uart_addr);
         }
     }
 

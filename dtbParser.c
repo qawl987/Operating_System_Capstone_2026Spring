@@ -20,7 +20,7 @@ struct fdt_header {
 };
 
 struct path {
-    char path[64];
+    char path[256];
     int len;
 };
 
