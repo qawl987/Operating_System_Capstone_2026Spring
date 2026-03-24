@@ -2,22 +2,23 @@ RISCV_GNU ?= riscv64-unknown-elf
 CC = $(RISCV_GNU)-gcc
 LD = $(RISCV_GNU)-ld
 OBJCOPY = $(RISCV_GNU)-objcopy
-CFLAGS_COMMON = -mcmodel=medany -ffreestanding -nostdlib -g -Wall -fPIE
+CFLAGS_COMMON = -mcmodel=medany -ffreestanding -nostdlib -g -Wall -fPIE -I include
 QEMU ?= qemu-system-riscv64
 TARGET = kernel
 
 # Source files
-SRCS_C = main.c uart.c bootloader.c dtbParser.c helper.c initrd.c sbi.c
-SRCS_S = start.S
+SRC_DIR = src
+SRCS_C = $(SRC_DIR)/main.c $(SRC_DIR)/uart.c $(SRC_DIR)/bootloader.c $(SRC_DIR)/dtbParser.c $(SRC_DIR)/helper.c $(SRC_DIR)/initrd.c $(SRC_DIR)/sbi.c
+SRCS_S = $(SRC_DIR)/start.S
 
 build: clean
 	$(CC) $(CFLAGS_COMMON) -DPLATFORM_QEMU -c $(SRCS_S) $(SRCS_C)
-	$(LD) -T link.ld -o $(TARGET).elf *.o
+	$(LD) -T $(SRC_DIR)/link.ld -o $(TARGET).elf *.o
 	$(OBJCOPY) -O binary $(TARGET).elf $(TARGET).img
 
 build_pi: clean
 	$(CC) $(CFLAGS_COMMON) -DPLATFORM_PI -c $(SRCS_S) $(SRCS_C)
-	$(LD) -T link_pi.ld -o $(TARGET).elf *.o
+	$(LD) -T $(SRC_DIR)/link_pi.ld -o $(TARGET).elf *.o
 	$(OBJCOPY) -O binary $(TARGET).elf $(TARGET).img
 	mkimage -f kernel.its kernel.fit
 

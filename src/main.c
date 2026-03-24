@@ -1,18 +1,9 @@
+#include "bootloader.h"
+#include "dtbParser.h"
 #include "helper.h"
+#include "initrd.h"
 #include "sbi.h"
-
-extern void uart_init(unsigned long base);
-extern char uart_getc(void);
-extern void uart_putc(char c);
-extern void uart_puts(const char *s);
-extern void uart_hex(unsigned long h);
-extern void load_kernel(void *dtb);
-extern int fdt_path_offset(const void *fdt, const char *target_path);
-extern const void *fdt_getprop(const void *fdt, int nodeoffset,
-                               const char *name, int *lenp);
-extern void initrd_list(const void *start, const void *end);
-extern void initrd_cat(const void *start, const void *end,
-                       const char *filename);
+#include "uart.h"
 
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART

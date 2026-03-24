@@ -1,10 +1,6 @@
 #include "helper.h"
+#include "uart.h"
 #include <stdarg.h>
-
-// UART functions (defined in uart.c)
-extern void uart_putc(char c);
-extern void uart_puts(const char *s);
-extern void uart_hex(unsigned long h);
 
 size_t strlen(const char *s) {
     size_t len = 0;

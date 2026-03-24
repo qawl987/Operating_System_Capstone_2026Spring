@@ -1,17 +1,14 @@
 #include "config.h"
+#include "helper.h"
+#include "uart.h"
 #include <stdint.h>
-
-// 宣告外部函式
-extern char uart_getc_raw(void);
-extern void uart_puts(const char *s);
-extern void uart_putc(char c);
-extern void printf(const char *fmt, ...);
 
 // 在 start.S 中定義的重定位函式
 extern void relocate_and_continue(void *dtb, void (*continue_func)(void *dtb));
 
 // 計算函式在高位的地址
-#define HIGH_ADDR(func) ((void (*)(void *))(RELOC_ADDR + ((unsigned long)(func) - LOAD_ADDR)))
+#define HIGH_ADDR(func)                                                        \
+    ((void (*)(void *))(RELOC_ADDR + ((unsigned long)(func) - LOAD_ADDR)))
 
 // 接收並載入 kernel 的實際工作函式
 // 此函式會在重定位後從高位被呼叫
@@ -73,7 +70,8 @@ static void do_load_kernel(void *dtb) {
     }
 
     uart_puts("\r\n");
-    printf("Jumping to kernel at %x (DTB: %x)\r\n", LOAD_ADDR, (unsigned long)dtb);
+    printf("Jumping to kernel at %x (DTB: %x)\r\n", LOAD_ADDR,
+           (unsigned long)dtb);
 
     // 4. 跳轉到新 kernel
     register unsigned long a0_hart asm("a0") = 0;
@@ -87,10 +85,10 @@ static void do_load_kernel(void *dtb) {
 // 先把 bootloader 搬到高位，再從高位執行 do_load_kernel
 void load_kernel(void *dtb) {
     uart_puts("Relocating bootloader to high memory...\r\n");
-    
+
     // 計算 do_load_kernel 在高位的地址
     void (*high_func)(void *) = HIGH_ADDR(do_load_kernel);
-    
+
     // 搬移並跳轉到高位繼續執行
     // 此函式不會返回
     relocate_and_continue(dtb, high_func);
