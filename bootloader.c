@@ -8,15 +8,17 @@ extern void uart_putc(char c);
 extern void printf(const char *fmt, ...);
 
 // KERNEL_LOAD_ADDR 從 config.h 取得 (LOAD_ADDR)
-// 由於 bootloader 已自我重定位，可以載入到標準入口點
 #define KERNEL_LOAD_ADDR LOAD_ADDR
 
-// 讀取 RISC-V time CSR (需要 SBI 或直接讀取 mtime)
-// static inline uint64_t read_time(void) {
-//     uint64_t time;
-//     asm volatile("rdtime %0" : "=r"(time));
-//     return time;
-// }
+// Trampoline 代碼放在安全的高位地址 (不會被新 kernel 覆蓋)
+// 這個地址在 initrd 之前，且遠離 0x20000000 的 bootloader
+#define TRAMPOLINE_ADDR 0x40000000ULL
+
+// Trampoline 機器碼: 跳轉到 a2 指定的地址
+// 指令: jr a2 (jalr x0, 0(a2)) = 0x00060067
+static const uint32_t trampoline_code[] = {
+    0x00060067, // jr a2
+};
 
 void load_kernel(void *dtb) {
     uart_puts("Waiting for kernel image via UART...\r\n");
@@ -86,14 +88,31 @@ void load_kernel(void *dtb) {
     }
 
     uart_puts("\r\n");
-    printf("Jumping to kernel at %x (DTB: %x)\r\n", KERNEL_LOAD_ADDR, (unsigned long)dtb);
+    printf("Jumping to kernel at %x (DTB: %x)\r\n", KERNEL_LOAD_ADDR,
+           (unsigned long)dtb);
 
-    // 4. 交出控制權：跳轉到 Kernel 載入的位址
-    // 新 kernel 的 _start 期望 DTB 地址在 a1 寄存器中
-    register unsigned long a0_hart asm("a0") = 0; // Hart ID = 0
+    // 4. 使用 trampoline 安全地跳轉到新 kernel
+    // 問題：當前 bootloader 在 0x20000000 運行，新 kernel
+    // 會重定位到同一位置並覆蓋它 解決：先跳到安全位置的
+    // trampoline，再從那裡跳到新 kernel
+
+    // 複製 trampoline 代碼到安全位置
+    volatile uint32_t *tramp_dest = (volatile uint32_t *)TRAMPOLINE_ADDR;
+    for (unsigned i = 0; i < sizeof(trampoline_code) / sizeof(uint32_t); i++) {
+        tramp_dest[i] = trampoline_code[i];
+    }
+
+    // 確保 instruction cache 同步 (fence.i)
+    // 使用 .insn 來編碼 fence.i 指令，避免需要 zifencei 擴展
+    asm volatile(".insn i 0x0F, 0x1, x0, x0, 0x000");
+
+    // 跳轉到 trampoline，由它跳到新 kernel
+    // a0 = hart_id, a1 = dtb, a2 = kernel entry point
+    register unsigned long a0_hart asm("a0") = 0;
     register unsigned long a1_dtb asm("a1") = (unsigned long)dtb;
-    void (*kernel_entry)(unsigned long, void *) =
-        (void (*)(unsigned long, void *))KERNEL_LOAD_ADDR;
-    asm volatile("" : : "r"(a0_hart), "r"(a1_dtb)); // 確保 a0, a1 被設置
-    kernel_entry(a0_hart, dtb);
+    register unsigned long a2_entry asm("a2") = KERNEL_LOAD_ADDR;
+
+    void (*trampoline)(void) = (void (*)(void))TRAMPOLINE_ADDR;
+    asm volatile("" : : "r"(a0_hart), "r"(a1_dtb), "r"(a2_entry));
+    trampoline();
 }

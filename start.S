@@ -22,21 +22,15 @@ _start:
     mv   s1, a1
 
     // Check if we're already relocated (compare current PC with RELOC_DEST)
+    // If PC >= RELOC_DEST, we're already running from high memory, skip relocation
     li   t1, RELOC_DEST
     auipc t0, 0              // Get current PC
     bgeu t0, t1, relocated_entry
-    
-    // Check if we're running at LOAD_BASE (loaded by bootloader)
-    // In this case, skip relocation - we want to run in place
-    li   t1, LOAD_BASE
-    // t0 still contains current PC from auipc
-    li   t2, 0x1000          // Allow 4KB tolerance for PC offset
-    sub  t3, t0, t1          // t3 = current_pc - LOAD_BASE
-    bltu t3, t2, skip_relocation  // If within tolerance, skip relocation
 
     // === RELOCATION CODE ===
-    // Copy bootloader from LOAD_BASE to RELOC_DEST
-    li   t0, LOAD_BASE       // Source start
+    // We're running from low memory (0x00200000), relocate to high memory (0x20000000)
+    // This frees up low memory for loading new kernels via UART
+    la   t0, _load_start     // Source start (PC-relative, works from any location)
     la   t1, _load_end       // Source end (PC-relative)
     li   t2, RELOC_DEST      // Destination
 
@@ -54,11 +48,6 @@ copy_done:
     mv   a1, s1              // 恢復 DTB address 到 a1
     li   t0, RELOC_DEST
     jr   t0
-
-skip_relocation:
-    // We're running at LOAD_BASE (loaded via UART bootloader)
-    // Skip relocation and continue directly to bss clear
-    j    relocated_entry
 
 relocated_entry:
     // Now running from relocated address
