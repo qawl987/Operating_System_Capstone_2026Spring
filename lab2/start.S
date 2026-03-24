@@ -1,5 +1,6 @@
 .section ".text.boot"
 .global _start
+.global relocate_and_continue
 
 /*
  * Platform-specific addresses defined via preprocessor
@@ -14,65 +15,64 @@
 
 _start:
     // === 1. Multi-core Check ===
-    // 檢查 Hart ID (a0)。如果不是 0 (Primary Core)，就跳轉到 park_core 進入休眠
     bnez a0, park_core
 
-    // 保存 Hart ID (a0) 到 s0，保存 DTB address (a1) 到 s1
+    // 保存 Hart ID 和 DTB address
     mv   s0, a0
     mv   s1, a1
 
-    // Check if we're already relocated (compare current PC with RELOC_DEST)
-    // If PC >= RELOC_DEST, we're already running from high memory, skip relocation
-    li   t1, RELOC_DEST
-    auipc t0, 0              // Get current PC
-    bgeu t0, t1, relocated_entry
-
-    // === RELOCATION CODE ===
-    // We're running from low memory (0x00200000), relocate to high memory (0x20000000)
-    // This frees up low memory for loading new kernels via UART
-    la   t0, _load_start     // Source start (PC-relative, works from any location)
-    la   t1, _load_end       // Source end (PC-relative)
-    li   t2, RELOC_DEST      // Destination
-
-copy_loop:
-    bgeu t0, t1, copy_done
-    ld   t3, 0(t0)           // Load 8 bytes
-    sd   t3, 0(t2)           // Store 8 bytes
-    addi t0, t0, 8
-    addi t2, t2, 8
-    j    copy_loop
-
-copy_done:
-    // Jump to relocated _start
-    mv   a0, s0              // 恢復 Hart ID 到 a0
-    mv   a1, s1              // 恢復 DTB address 到 a1
-    li   t0, RELOC_DEST
-    jr   t0
-
-relocated_entry:
-    // Now running from relocated address
-    
-    // Clear the .bss section
+    // 清除 .bss section
     la   t0, __bss_start
     la   t1, __bss_stop
 
 bss_clear:
     bgeu t0, t1, bss_done
-    sd   zero, 0(t0)         // Store 8 bytes of zeros
+    sd   zero, 0(t0)
     addi t0, t0, 8
     j    bss_clear
 
 bss_done:
-    // Set up the stack pointer (stack grows downward, _end is top of stack)
+    // 設置 stack pointer
     la   sp, _end
 
-    // Call start_kernel with hartid in a0, DTB address in a1
+    // 呼叫 start_kernel
     mv   a0, s0
     mv   a1, s1
     tail start_kernel
 
-    // === 3. Park Core ===
-    // 非主核心會陷入這個無窮迴圈
+// === Relocation Function ===
+// void relocate_and_continue(void *dtb, void (*continue_func)(void *dtb))
+// a0 = dtb, a1 = continue_func (在高位的地址)
+// 
+// 此函數：
+// 1. 把 bootloader 從低位搬到高位
+// 2. 跳轉到高位的 continue_func 繼續執行
+relocate_and_continue:
+    // 保存參數
+    mv   s0, a0              // s0 = dtb
+    mv   s1, a1              // s1 = continue_func (高位地址)
+
+    // 複製 bootloader 到高位
+    la   t0, _load_start     // Source start (PC-relative)
+    la   t1, _load_end       // Source end
+    li   t2, RELOC_DEST      // Destination
+
+copy_loop:
+    bgeu t0, t1, copy_done
+    ld   t3, 0(t0)
+    sd   t3, 0(t2)
+    addi t0, t0, 8
+    addi t2, t2, 8
+    j    copy_loop
+
+copy_done:
+    // fence.i 確保 instruction cache 同步
+    .insn i 0x0F, 0x1, x0, x0, 0x000
+
+    // 跳轉到高位的 continue_func
+    mv   a0, s0              // a0 = dtb
+    jr   s1                  // 跳到 continue_func
+
 park_core:
-    wfi                      // Wait for Interrupt
+    wfi
     j    park_core
