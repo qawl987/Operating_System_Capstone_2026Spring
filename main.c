@@ -62,6 +62,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     }
 
     uart_puts("\nStarting kernel ...\n");
+    printf("DTB: %x\n", (unsigned long)dtb_base);
     if (initrd_start_addr && initrd_end_addr) {
         printf("initrd: %x - %x\n", initrd_start_addr, initrd_end_addr);
     }

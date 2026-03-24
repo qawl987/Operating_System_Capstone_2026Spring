@@ -85,20 +85,15 @@ void load_kernel(void *dtb) {
         }
     }
 
-    // 結束計時並顯示時間
-    // uint64_t end_time = read_time();
-    // uint64_t elapsed = end_time - start_time;
-    // QEMU timer frequency is typically 10MHz, OrangePi may differ
-    // 顯示原始 ticks 和估算時間 (假設 10MHz)
-    // uint64_t ms = elapsed / 10000; // 10MHz -> ms
-    // printf("\r\nKernel loaded successfully! (Time: %d ms, %d ticks)\r\n",
-    //        (uint32_t)ms, (uint32_t)elapsed);
-    uart_puts("Jumping to kernel...\r\n");
+    uart_puts("\r\n");
+    printf("Jumping to kernel at %x (DTB: %x)\r\n", KERNEL_LOAD_ADDR, (unsigned long)dtb);
 
     // 4. 交出控制權：跳轉到 Kernel 載入的位址
     // 新 kernel 的 _start 期望 DTB 地址在 a1 寄存器中
+    register unsigned long a0_hart asm("a0") = 0; // Hart ID = 0
     register unsigned long a1_dtb asm("a1") = (unsigned long)dtb;
-    void (*kernel_entry)(void) = (void (*)(void))KERNEL_LOAD_ADDR;
-    asm volatile("" : : "r"(a1_dtb)); // 確保 a1 被設置
-    kernel_entry();
+    void (*kernel_entry)(unsigned long, void *) =
+        (void (*)(unsigned long, void *))KERNEL_LOAD_ADDR;
+    asm volatile("" : : "r"(a0_hart), "r"(a1_dtb)); // 確保 a0, a1 被設置
+    kernel_entry(a0_hart, dtb);
 }
