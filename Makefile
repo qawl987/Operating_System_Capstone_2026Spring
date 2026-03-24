@@ -1,36 +1,63 @@
-# 使用方式: make add-lab LAB=lab1 URL=https://github.com/nycuosc2026/lab1-xxx.git
-# 預設分支為 main
+# ==========================================
+# 設定區：請確認你的 GitHub ID 是否正確
+# ==========================================
+GITHUB_USER := qawl987
+ORG_URL     := https://github.com/nycuosc2026
+ALL_LABS    := lab1 lab2 lab3 lab4 lab5 lab6 lab7
 
-.PHONY: add-lab
+# ==========================================
+# 自動生成 URL 邏輯
+# ==========================================
+# 如果有傳入 LAB=lab1，URL 就會是 https://github.com/nycuosc2026/lab1-qawl987.git
+URL = $(ORG_URL)/$(LAB)-$(GITHUB_USER).git
 
-add-lab:
-	@if [ -z "$(LAB)" ] || [ -z "$(URL)" ]; then \
-		echo "Usage: make add-lab LAB=labX URL=https://github.com/..."; \
-		exit 1; \
-	fi
-	@echo "--- Adding $(LAB) from $(URL) ---"
-	
-	# 1. 新增遠端並抓取
-	git remote add $(LAB)_remote $(URL)
+.PHONY: add sync sync-all help
+
+help:
+	@echo "NYCU OS Lab Sync Tool"
+	@echo "Usage:"
+	@echo "  make add LAB=labX    - 第一次導入某個 Lab (例如 make add LAB=lab3)"
+	@echo "  make sync LAB=labX   - 同步更新某個 Lab (例如 make sync LAB=lab2)"
+	@echo "  make sync-all        - 一次更新所有已經導入過的 Labs"
+
+# 第一次導入
+add:
+	@if [ -z "$(LAB)" ]; then echo "Usage: make add LAB=labX"; exit 1; fi
+	@echo "--- Initializing $(LAB) from $(URL) ---"
+	git remote add $(LAB)_remote $(URL) 2>/dev/null || git remote set-url $(LAB)_remote $(URL)
 	git fetch $(LAB)_remote
-	
-	# 2. 建立橋樑分支並切換 (基於遠端的 main)
-	git checkout -b $(LAB)_temp_branch $(LAB)_remote/main
-	
-	# 3. 建立子目錄並移動所有檔案 (包含隱藏檔，排除 .git)
+	git checkout -b $(LAB)_init_temp $(LAB)_remote/main
 	mkdir -p $(LAB)
 	find . -maxdepth 1 ! -name "." ! -name ".git" ! -name "$(LAB)" -exec mv {} $(LAB)/ \;
-	
-	# 4. Commit 搬移結果
 	git add .
-	git commit -m "Internal: Move $(LAB) files to $(LAB)/ directory"
-	
-	# 5. 切換回 main 並合併
+	git commit -m "Internal: Initialize $(LAB) folder structure"
 	git checkout main
-	git merge $(LAB)_temp_branch --allow-unrelated-histories --no-edit
-	
-	# 6. 清理
-	git branch -d $(LAB)_temp_branch
-	git remote remove $(LAB)_remote
-	
-	@echo "--- Successfully integrated $(LAB) ---"
+	git merge $(LAB)_init_temp --allow-unrelated-histories --no-edit
+	git branch -D $(LAB)_init_temp
+	@echo "--- $(LAB) added! ---"
+
+# 無腦同步更新
+sync:
+	@if [ -z "$(LAB)" ]; then echo "Usage: make sync LAB=labX"; exit 1; fi
+	@echo "--- Syncing $(LAB) from $(URL) ---"
+	git remote add $(LAB)_remote $(URL) 2>/dev/null || git remote set-url $(LAB)_remote $(URL)
+	git fetch $(LAB)_remote
+	git branch -D $(LAB)_sync_temp 2>/dev/null || true
+	git checkout -b $(LAB)_sync_temp $(LAB)_remote/main
+	mkdir -p $(LAB)
+	find . -maxdepth 1 ! -name "." ! -name ".git" ! -name "$(LAB)" -exec mv {} $(LAB)/ \;
+	git add .
+	git commit -m "Internal: Prepare $(LAB) for sync" || echo "No changes"
+	git checkout main
+	# 使用 -X theirs 強制以遠端內容為準
+	git merge $(LAB)_sync_temp --allow-unrelated-histories -X theirs --no-edit
+	git branch -D $(LAB)_sync_temp
+	@echo "--- $(LAB) sync complete ---"
+
+# 一次更新所有 Lab (會跳過尚未 add 的 lab)
+sync-all:
+	@for lab in $(ALL_LABS); do \
+		if [ -d "$$lab" ]; then \
+			$(MAKE) sync LAB=$$lab; \
+		fi \
+	done
