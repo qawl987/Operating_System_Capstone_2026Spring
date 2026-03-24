@@ -7,12 +7,12 @@ QEMU ?= qemu-system-riscv64
 TARGET = kernel
 
 build: clean
-	$(CC) $(CFLAGS) -c *.S *.c
+	$(CC) $(CFLAGS) -DPLATFORM_QEMU -c *.S *.c
 	$(LD) -T link.ld -o $(TARGET).elf *.o
 	$(OBJCOPY) -O binary $(TARGET).elf $(TARGET)
 
 build_pi: clean
-	$(CC) $(CFLAGS) -c *.S *.c
+	$(CC) $(CFLAGS) -DPLATFORM_PI -c *.S *.c
 	$(LD) -T link_pi.ld -o $(TARGET).elf start.o main.o uart.o
 	$(OBJCOPY) -O binary $(TARGET).elf $(TARGET).bin
 	mkimage -f kernel.its kernel.fit

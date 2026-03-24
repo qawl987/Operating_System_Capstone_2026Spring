@@ -4,3 +4,4 @@ kernel
 kernel.bin
 kernel.fit
 kernel.elf
+x1_orangepi-rv2.dtb

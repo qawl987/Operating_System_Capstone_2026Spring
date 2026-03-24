@@ -1,30 +1,42 @@
-struct sbiret {
-    long error;
-    long value;
-};
-extern struct sbiret sbi_ecall(int ext, int fid, unsigned long arg0, unsigned long arg1, 
-                               unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5);
+#ifdef PLATFORM_PI
+// Orange Pi RV2: PXA UART, reg-shift=2, reg-io-width=4
+#define UART_BASE   0xD4017000UL
+#define REG_SHIFT   2
+#define LSR_DR      (1 << 0)
+#define LSR_TDRQ    (1 << 6)  // TEMT for PXA
+typedef volatile unsigned int uart_reg_t;
+#else
+// QEMU virt: 16550 UART, 8-bit registers
+#define UART_BASE   0x10000000UL
+#define REG_SHIFT   0
+#define LSR_DR      (1 << 0)
+#define LSR_TDRQ    (1 << 5)  // THRE for 16550
+typedef volatile unsigned char uart_reg_t;
+#endif
 
-// 呼叫 OpenSBI Legacy Console Putchar (Extension ID: 1)
-void uart_putc(char c) {
-    if (c == '\n') {
-        sbi_ecall(1, 0, '\r', 0, 0, 0, 0, 0); // 處理換行對齊
-    }
-    sbi_ecall(1, 0, c, 0, 0, 0, 0, 0);
-}
+#define UART_RBR ((uart_reg_t *)(UART_BASE + (0x0 << REG_SHIFT)))
+#define UART_THR ((uart_reg_t *)(UART_BASE + (0x0 << REG_SHIFT)))
+#define UART_LSR ((uart_reg_t *)(UART_BASE + (0x5 << REG_SHIFT)))
 
-// 呼叫 OpenSBI Legacy Console Getchar (Extension ID: 2)
 char uart_getc(void) {
-    struct sbiret ret;
-    do {
-        ret = sbi_ecall(2, 0, 0, 0, 0, 0, 0, 0);
-    } while (ret.error == -1); // 如果回傳 -1 代表還沒有按下鍵盤，繼續等
-    
-    char c = (char)ret.error;
+    while (!(*UART_LSR & LSR_DR))
+        ;
+    char c = (char)*UART_RBR;
     return c == '\r' ? '\n' : c;
 }
 
-void uart_puts(const char* s) {
+void uart_putc(char c) {
+    if (c == '\n') {
+        while (!(*UART_LSR & LSR_TDRQ))
+            ;
+        *UART_THR = '\r';
+    }
+    while (!(*UART_LSR & LSR_TDRQ))
+        ;
+    *UART_THR = c;
+}
+
+void uart_puts(const char *s) {
     while (*s) {
         uart_putc(*s++);
     }
