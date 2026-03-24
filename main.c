@@ -14,7 +14,7 @@ extern void initrd_list(const void *start, const void *end);
 extern void initrd_cat(const void *start, const void *end,
                        const char *filename);
 
-void start_kernel(void *dtb_base) {
+void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
     int offset = fdt_path_offset(dtb_base, "/soc/serial");
