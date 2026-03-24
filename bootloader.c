@@ -7,12 +7,8 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void printf(const char *fmt, ...);
 
-// KERNEL_LOAD_ADDR 從 config.h 取得 (LOAD_ADDR)
+// KERNEL_LOAD_ADDR 和 TRAMPOLINE_ADDR 從 config.h 取得
 #define KERNEL_LOAD_ADDR LOAD_ADDR
-
-// Trampoline 代碼放在安全的高位地址 (不會被新 kernel 覆蓋)
-// 這個地址在 initrd 之前，且遠離 0x20000000 的 bootloader
-#define TRAMPOLINE_ADDR 0x40000000ULL
 
 // Trampoline 機器碼: 跳轉到 a2 指定的地址
 // 指令: jr a2 (jalr x0, 0(a2)) = 0x00060067
