@@ -5,12 +5,10 @@
 /* QEMU virt machine addresses */
 #define LOAD_ADDR 0x80200000ULL
 #define RELOC_ADDR 0x84000000ULL
-#define TRAMPOLINE_ADDR 0x88000000ULL
 #else
 /* Orange Pi RV2 addresses */
 #define LOAD_ADDR 0x00200000ULL
 #define RELOC_ADDR 0x20000000ULL
-#define TRAMPOLINE_ADDR 0x40000000ULL
 #endif
 
 /* Common definitions */
