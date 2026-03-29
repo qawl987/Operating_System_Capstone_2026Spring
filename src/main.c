@@ -1,4 +1,5 @@
 #include "bootloader.h"
+#include "buddy.h"
 #include "dtbParser.h"
 #include "helper.h"
 #include "initrd.h"
@@ -96,6 +97,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                        "  hello     - print hello world.\r\n"
                        "  info      - print system info.\r\n"
                        "  load      - load kernel via UART.\r\n"
+                       "  buddy     - test buddy system allocator.\r\n"
                        "  ls        - list files in initrd.\r\n"
                        "  cat <file>- display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -109,6 +111,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                        sbi_get_impl_version());
             } else if (strcmp(cmd_buf, "load") == 0) {
                 load_kernel(dtb_base);
+            } else if (strcmp(cmd_buf, "buddy") == 0) {
+                buddy_test();
             } else if (strcmp(cmd_buf, "ls") == 0) {
                 if (initrd_start_addr && initrd_end_addr) {
                     initrd_list((void *)initrd_start_addr,

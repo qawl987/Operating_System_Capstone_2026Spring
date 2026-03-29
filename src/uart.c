@@ -67,3 +67,44 @@ void uart_hex(unsigned long h) {
         uart_putc(n);
     }
 }
+
+void uart_puti(int i) {
+    char buf[12];
+    int idx = 0;
+    unsigned int u;
+
+    if (i < 0) {
+        uart_putc('-');
+        u = -i;
+    } else {
+        u = i;
+    }
+
+    if (u == 0) {
+        uart_putc('0');
+        return;
+    }
+
+    while (u > 0) {
+        buf[idx++] = '0' + (u % 10);
+        u /= 10;
+    }
+
+    while (idx > 0) {
+        uart_putc(buf[--idx]);
+    }
+}
+
+void uart_putx(unsigned long h) {
+    unsigned long n;
+    int started = 0;
+
+    for (int c = 60; c >= 0; c -= 4) {
+        n = (h >> c) & 0xf;
+        if (n || started || c == 0) {
+            started = 1;
+            n += n > 9 ? 0x57 : '0';
+            uart_putc(n);
+        }
+    }
+}

@@ -1,0 +1,53 @@
+/**
+ * Buddy System Page Frame Allocator
+ * Lab 3 - Memory Allocator
+ */
+#ifndef _BUDDY_H
+#define _BUDDY_H
+
+#include "list.h"
+
+/* Configuration */
+#define PAGE_SIZE 4096
+#define MAX_ORDER 10 /* Maximum block size = 2^10 * 4KB = 4MB */
+
+/* Frame status values */
+#define FRAME_FREE (-1)      /* Free but part of larger block */
+#define FRAME_ALLOCATED (-2) /* Allocated, not available */
+
+/**
+ * struct frame - Represents a page frame
+ * @order:    If >= 0, this is the head of a free block of 2^order pages
+ *            If FRAME_FREE, this frame is part of a larger block
+ *            If FRAME_ALLOCATED, this frame is allocated
+ * @refcount: Reference count for the frame
+ * @list:     Linked list node for free_area
+ */
+struct frame {
+    int order;
+    int refcount;
+    struct list_head list;
+};
+
+/* Initialize the buddy system with given memory region */
+void buddy_init(unsigned long base_addr, unsigned long size);
+
+/* Allocate 2^order contiguous pages, returns page index or -1 on failure */
+int alloc_pages(unsigned int order);
+
+/* Free pages starting at given index */
+void free_pages(int page_idx);
+
+/* Get physical address from page index */
+unsigned long page_to_addr(int page_idx);
+
+/* Get page index from physical address */
+int addr_to_page(unsigned long addr);
+
+/* Debug: dump free area status */
+void buddy_dump(void);
+
+/* Test function */
+void buddy_test(void);
+
+#endif /* _BUDDY_H */
