@@ -7,6 +7,114 @@
 #include "sbi.h"
 #include "uart.h"
 
+/* Linker symbols for kernel boundaries */
+extern char _kernel_start[];
+extern char _kernel_end[];
+
+/* Global state for initrd addresses */
+static unsigned long g_initrd_start = 0;
+static unsigned long g_initrd_end = 0;
+
+/**
+ * Parse /reserved-memory node and reserve all child regions
+ */
+static void parse_reserved_memory(void *dtb_base) {
+    int parent_offset = fdt_path_offset(dtb_base, "/reserved-memory");
+    if (parent_offset < 0) {
+        uart_puts("No /reserved-memory node found\n");
+        return;
+    }
+
+    uart_puts("Parsing /reserved-memory...\n");
+
+    /* Iterate through child nodes */
+    int child_offset = fdt_first_subnode(dtb_base, parent_offset);
+    while (child_offset >= 0) {
+        int len;
+        const void *reg = fdt_getprop(dtb_base, child_offset, "reg", &len);
+        if (reg && len >= 16) {
+            const uint32_t *cells = (const uint32_t *)reg;
+            /* reg = <addr_hi addr_lo size_hi size_lo> */
+            unsigned long addr = ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
+            unsigned long size = ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
+
+            printf("  Reserving region: 0x%x - 0x%x\n", addr, addr + size);
+            memory_reserve(addr, size);
+        }
+
+        child_offset = fdt_next_subnode(dtb_base, child_offset);
+    }
+}
+
+/**
+ * Initialize memory with reservations from DTB
+ * Parses DTB to get memory region and reserves:
+ * 1. DTB blob
+ * 2. Kernel image
+ * 3. Initramfs (if present)
+ * 4. Reserved memory regions (if present)
+ */
+static void memory_init_with_reserve(void *dtb_base,
+                                     unsigned long initrd_start,
+                                     unsigned long initrd_end) {
+    int offset, len;
+    const void *prop;
+    unsigned long mem_start = 0;
+    unsigned long mem_size = 0;
+
+    /* 1. Get memory region from DTB /memory node */
+    offset = fdt_path_offset(dtb_base, "/memory");
+    if (offset >= 0) {
+        prop = fdt_getprop(dtb_base, offset, "reg", &len);
+        if (prop && len >= 16) {
+            const uint32_t *cells = (const uint32_t *)prop;
+            /* reg = <addr_hi addr_lo size_hi size_lo> */
+            mem_start = ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
+            mem_size = ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
+        }
+    }
+
+    if (mem_start == 0 || mem_size == 0) {
+        uart_puts("[!] Failed to get memory region from DTB, using default\n");
+        mem_start = 0x80000000UL;
+        mem_size = 0x80000000UL; /* 2GB default */
+    }
+
+    printf("Memory region: 0x%x - 0x%x (%d MB)\n",
+           mem_start, mem_start + mem_size, mem_size / (1024 * 1024));
+
+    /* Initialize buddy system with the memory region */
+    buddy_init(mem_start, mem_size);
+
+    /* 2. Reserve DTB blob */
+    unsigned long dtb_start = (unsigned long)dtb_base;
+    unsigned long dtb_size = fdt_totalsize(dtb_base);
+    printf("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
+    memory_reserve(dtb_start, dtb_size);
+
+    /* 3. Reserve Kernel image */
+    unsigned long kernel_start = (unsigned long)_kernel_start;
+    unsigned long kernel_end = (unsigned long)_kernel_end;
+    unsigned long kernel_size = kernel_end - kernel_start;
+    printf("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end);
+    memory_reserve(kernel_start, kernel_size);
+
+    /* 4. Reserve Initramfs (if present) */
+    if (initrd_start && initrd_end && initrd_end > initrd_start) {
+        printf("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start, initrd_end);
+        memory_reserve(initrd_start, initrd_end - initrd_start);
+    }
+
+    /* 5. Parse and reserve /reserved-memory regions */
+    parse_reserved_memory(dtb_base);
+
+    /* Initialize dynamic allocator */
+    kmalloc_init();
+
+    uart_puts("Memory initialization complete.\n");
+    buddy_dump();
+}
+
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
@@ -25,13 +133,10 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
             uint64_t uart_addr =
                 ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
             uart_init(uart_addr);
-            printf("UART base address: %x\n", uart_addr);
         }
     }
 
     // Parse initrd start and end addresses from DTB
-    unsigned long initrd_start_addr = 0;
-    unsigned long initrd_end_addr = 0;
     offset = fdt_path_offset(dtb_base, "/chosen");
     if (offset >= 0) {
         int len;
@@ -39,26 +144,33 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
             fdt_getprop(dtb_base, offset, "linux,initrd-start", &len);
         if (reg) {
             if (len >= 8) {
-                initrd_start_addr = bswap64(*(const uint64_t *)reg);
+                g_initrd_start = bswap64(*(const uint64_t *)reg);
             } else if (len >= 4) {
-                initrd_start_addr = bswap32(*(const uint32_t *)reg);
+                g_initrd_start = bswap32(*(const uint32_t *)reg);
             }
         }
         reg = fdt_getprop(dtb_base, offset, "linux,initrd-end", &len);
         if (reg) {
             if (len >= 8) {
-                initrd_end_addr = bswap64(*(const uint64_t *)reg);
+                g_initrd_end = bswap64(*(const uint64_t *)reg);
             } else if (len >= 4) {
-                initrd_end_addr = bswap32(*(const uint32_t *)reg);
+                g_initrd_end = bswap32(*(const uint32_t *)reg);
             }
         }
     }
 
-    uart_puts("\nStarting kernel ...\n");
-    printf("DTB: %x\n", (unsigned long)dtb_base);
-    if (initrd_start_addr && initrd_end_addr) {
-        printf("initrd: %x - %x\n", initrd_start_addr, initrd_end_addr);
+    uart_puts("\n========================================\n");
+    uart_puts("Starting kernel ...\n");
+    uart_puts("========================================\n");
+    printf("DTB: 0x%x (size: %d bytes)\n", (unsigned long)dtb_base, fdt_totalsize(dtb_base));
+    printf("Kernel: 0x%x - 0x%x\n", (unsigned long)_kernel_start, (unsigned long)_kernel_end);
+    if (g_initrd_start && g_initrd_end) {
+        printf("Initrd: 0x%x - 0x%x\n", g_initrd_start, g_initrd_end);
     }
+    uart_puts("========================================\n\n");
+
+    /* Initialize memory system with reservations at startup */
+    memory_init_with_reserve(dtb_base, g_initrd_start, g_initrd_end);
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
     int cmd_idx = 0;
@@ -94,15 +206,14 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
         if (cmd_idx > 0) {
             if (strcmp(cmd_buf, "help") == 0) {
                 printf("Available commands:\r\n"
-                       "  help      - show all commands.\r\n"
-                       "  hello     - print hello world.\r\n"
-                       "  info      - print system info.\r\n"
-                       "  load      - load kernel via UART.\r\n"
-                       "  buddy     - test buddy system allocator.\r\n"
-                       "  kmalloc   - test dynamic memory allocator.\r\n"
-                       "  alloc_test- run spec test case (test_alloc_1).\r\n"
-                       "  ls        - list files in initrd.\r\n"
-                       "  cat <file>- display file content.\r\n");
+                       "  help       - show all commands.\r\n"
+                       "  hello      - print hello world.\r\n"
+                       "  info       - print system info.\r\n"
+                       "  meminfo    - show memory status.\r\n"
+                       "  load       - load kernel via UART.\r\n"
+                       "  alloc_test - run spec test case (test_alloc_1).\r\n"
+                       "  ls         - list files in initrd.\r\n"
+                       "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
                 printf("Hello world.\r\n");
             } else if (strcmp(cmd_buf, "info") == 0) {
@@ -112,30 +223,24 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 printf("  implementation ID: %x\r\n", sbi_get_impl_id());
                 printf("  implementation version: %x\r\n",
                        sbi_get_impl_version());
+            } else if (strcmp(cmd_buf, "meminfo") == 0) {
+                buddy_dump();
             } else if (strcmp(cmd_buf, "load") == 0) {
                 load_kernel(dtb_base);
-            } else if (strcmp(cmd_buf, "buddy") == 0) {
-                buddy_test();
-            } else if (strcmp(cmd_buf, "kmalloc") == 0) {
-                buddy_init(0x90000000UL, 0x10000000UL);
-                kmalloc_init();
-                kmalloc_test();
             } else if (strcmp(cmd_buf, "alloc_test") == 0) {
-                buddy_init(0x90000000UL, 0x10000000UL);
-                kmalloc_init();
                 alloc_test();
             } else if (strcmp(cmd_buf, "ls") == 0) {
-                if (initrd_start_addr && initrd_end_addr) {
-                    initrd_list((void *)initrd_start_addr,
-                                (void *)initrd_end_addr);
+                if (g_initrd_start && g_initrd_end) {
+                    initrd_list((void *)g_initrd_start,
+                                (void *)g_initrd_end);
                 } else {
                     printf("No initrd loaded.\r\n");
                 }
             } else if (strncmp(cmd_buf, "cat ", 4) == 0) {
-                if (initrd_start_addr && initrd_end_addr) {
+                if (g_initrd_start && g_initrd_end) {
                     const char *filename = cmd_buf + 4;
-                    initrd_cat((void *)initrd_start_addr,
-                               (void *)initrd_end_addr, filename);
+                    initrd_cat((void *)g_initrd_start,
+                               (void *)g_initrd_end, filename);
                 } else {
                     printf("No initrd loaded.\r\n");
                 }

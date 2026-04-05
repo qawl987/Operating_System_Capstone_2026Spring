@@ -8,21 +8,20 @@
 #include "buddy.h"
 #include "uart.h"
 
-/* Hardcoded memory region for Basic Exercise */
-/* QEMU virt: RAM starts at 0x80000000 */
-/* Use a safe region that doesn't conflict with kernel */
-#define MEM_BASE 0x90000000UL
-#define MEM_SIZE 0x10000000UL /* 256 MB */
-#define NUM_PAGES (MEM_SIZE / PAGE_SIZE)
+/* Maximum supported memory size (2 GB for full QEMU virt memory) */
+/* 2GB = 524288 pages, each frame ~28 bytes = ~14MB frame array */
+#define MAX_MEM_SIZE 0x80000000UL /* 2 GB */
+#define MAX_NUM_PAGES (MAX_MEM_SIZE / PAGE_SIZE)
 
 /* Frame array - represents all page frames */
-static struct frame mem_map[NUM_PAGES];
+static struct frame mem_map[MAX_NUM_PAGES];
 
 /* Free area lists - one list per order */
 static struct list_head free_area[MAX_ORDER + 1];
 
-/* Base address of managed memory */
-static unsigned long mem_base = MEM_BASE;
+/* Base address and size of managed memory */
+static unsigned long mem_base = 0;
+static unsigned long num_pages = 0;
 
 /* Helper macros */
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -109,10 +108,19 @@ static void log_free(unsigned long addr, int order, int idx) {
  * Sets up the frame array and free lists
  */
 void buddy_init(unsigned long base_addr, unsigned long size) {
-    int i;
-    int num_pages = size / PAGE_SIZE;
+    unsigned long i;
+    unsigned long init_num_pages = size / PAGE_SIZE;
+
+    /* Limit to maximum supported pages */
+    if (init_num_pages > MAX_NUM_PAGES) {
+        init_num_pages = MAX_NUM_PAGES;
+        uart_puts("[!] Memory limited to ");
+        uart_puti(MAX_NUM_PAGES);
+        uart_puts(" pages\n");
+    }
 
     mem_base = base_addr;
+    num_pages = init_num_pages;
 
     /* Initialize all free area lists */
     for (i = 0; i <= MAX_ORDER; i++) {
@@ -227,7 +235,7 @@ void free_pages(int page_idx) {
         int buddy_idx = get_buddy_idx(cur_idx, current_order);
 
         /* Check if buddy exists within bounds */
-        if (buddy_idx < 0 || buddy_idx >= NUM_PAGES) {
+        if (buddy_idx < 0 || buddy_idx >= num_pages) {
             break;
         }
 
@@ -281,7 +289,7 @@ int addr_to_page(unsigned long addr) { return (addr - mem_base) / PAGE_SIZE; }
  * Set chunk size for a page (used by kmalloc)
  */
 void set_page_chunk_size(int page_idx, int chunk_size) {
-    if (page_idx >= 0 && page_idx < NUM_PAGES) {
+    if (page_idx >= 0 && page_idx < num_pages) {
         mem_map[page_idx].chunk_size = chunk_size;
     }
 }
@@ -290,10 +298,98 @@ void set_page_chunk_size(int page_idx, int chunk_size) {
  * Get chunk size for a page (used by kfree)
  */
 int get_page_chunk_size(int page_idx) {
-    if (page_idx >= 0 && page_idx < NUM_PAGES) {
+    if (page_idx >= 0 && page_idx < num_pages) {
         return mem_map[page_idx].chunk_size;
     }
     return 0;
+}
+
+/**
+ * Log message for memory reservation
+ */
+static void log_reserve(unsigned long start, unsigned long end) {
+    uart_puts("[Reserve] Reserve address [0x");
+    uart_putx(start);
+    uart_puts(", 0x");
+    uart_putx(end);
+    uart_puts(")\n");
+}
+
+/**
+ * Reserve a memory region by removing pages from free lists
+ * Algorithm: iterate from MAX_ORDER down to 0, split blocks that overlap
+ * with reserved region until all overlapping pages are removed.
+ */
+void memory_reserve(unsigned long start, unsigned long size) {
+    unsigned long end = start + size;
+
+    /* Convert to page frame numbers relative to mem_base */
+    if (start < mem_base) {
+        if (end <= mem_base) return;  /* Region is below managed memory */
+        start = mem_base;
+    }
+    if (end > mem_base + (unsigned long)num_pages * PAGE_SIZE) {
+        end = mem_base + (unsigned long)num_pages * PAGE_SIZE;
+    }
+
+    unsigned long start_pfn = (start - mem_base) / PAGE_SIZE;
+    unsigned long end_pfn = (end - mem_base + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    if (start_pfn >= end_pfn) return;
+
+    log_reserve(start, end);
+
+    /* Iterate from MAX_ORDER down to 0 */
+    for (int order = MAX_ORDER; order >= 0; order--) {
+        struct list_head *pos, *n;
+
+        list_for_each_safe(pos, n, &free_area[order]) {
+            struct frame *curr = list_entry(pos, struct frame, list);
+            unsigned long block_start_pfn = curr - mem_map;
+            unsigned long block_end_pfn = block_start_pfn + (1 << order);
+
+            /* Case 1: No overlap - skip */
+            if (block_end_pfn <= start_pfn || block_start_pfn >= end_pfn) {
+                continue;
+            }
+
+            /* Case 2: Block is entirely within reserved region - remove it */
+            if (block_start_pfn >= start_pfn && block_end_pfn <= end_pfn) {
+                list_del_init(&curr->list);
+                curr->order = FRAME_ALLOCATED;
+                curr->refcount = 1;
+                log_remove_from_free(block_start_pfn, order);
+                continue;
+            }
+
+            /* Case 3: Partial overlap - split the block */
+            if (order > 0) {
+                list_del_init(&curr->list);
+                log_remove_from_free(block_start_pfn, order);
+
+                int next_order = order - 1;
+                unsigned long buddy_pfn = block_start_pfn + (1 << next_order);
+
+                /* Add the lower half */
+                curr->order = next_order;
+                list_add_tail(&curr->list, &free_area[next_order]);
+                log_add_to_free(block_start_pfn, next_order);
+
+                /* Add the upper half (buddy) */
+                struct frame *buddy = &mem_map[buddy_pfn];
+                buddy->order = next_order;
+                INIT_LIST_HEAD(&buddy->list);
+                list_add_tail(&buddy->list, &free_area[next_order]);
+                log_add_to_free(buddy_pfn, next_order);
+            } else {
+                /* order 0 with partial overlap means this single page overlaps */
+                list_del_init(&curr->list);
+                curr->order = FRAME_ALLOCATED;
+                curr->refcount = 1;
+                log_remove_from_free(block_start_pfn, order);
+            }
+        }
+    }
 }
 
 /**
@@ -320,13 +416,17 @@ void buddy_dump(void) {
 
 /* ========== Test Code ========== */
 
+/* Default test memory region */
+#define TEST_MEM_BASE 0x90000000UL
+#define TEST_MEM_SIZE 0x10000000UL /* 256 MB */
+
 void buddy_test(void) {
     int p1, p2, p3;
 
     uart_puts("\n===== Buddy System Test =====\n");
 
     /* Initialize with hardcoded region */
-    buddy_init(MEM_BASE, MEM_SIZE);
+    buddy_init(TEST_MEM_BASE, TEST_MEM_SIZE);
     buddy_dump();
 
     uart_puts("\n--- Allocating p1 (order 1) ---\n");

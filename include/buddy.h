@@ -59,4 +59,14 @@ void set_page_chunk_size(int page_idx, int chunk_size);
 /* Get chunk size for a page (used by kfree) */
 int get_page_chunk_size(int page_idx);
 
+/**
+ * memory_reserve - Reserve a memory region
+ * @start: Start physical address
+ * @size:  Size in bytes
+ *
+ * Marks pages in [start, start+size) as reserved, removing them from free lists.
+ * Must be called after buddy_init().
+ */
+void memory_reserve(unsigned long start, unsigned long size);
+
 #endif /* _BUDDY_H */

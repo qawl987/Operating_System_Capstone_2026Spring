@@ -88,7 +88,8 @@ int fdt_path_offset(const void *fdt, const char *target_path) {
                     fpath.path[fpath.len++] = '/';
                     added_len++;
                 } else if (fpath.len == 0) {
-                    // Theoretically BEGIN_NODE should have root before, but add safety check
+                    // Theoretically BEGIN_NODE should have root before, but add
+                    // safety check
                     fpath.path[fpath.len++] = '/';
                     added_len++;
                 }
@@ -145,8 +146,9 @@ const void *fdt_getprop(const void *fdt, int nodeoffset, const char *name,
     uint32_t tag = bswap32(*(uint32_t *)p);
     if (tag != FDT_BEGIN_NODE)
         return NULL;
-    p += 4;                                           // Skip tag
-    p = (const char *)align_up(p + strlen(p) + 1, 4); // Skip node name and align
+    p += 4; // Skip tag
+    p = (const char *)align_up(p + strlen(p) + 1,
+                               4); // Skip node name and align
 
     while (1) {
         uint32_t tag = bswap32(*(uint32_t *)p);
@@ -170,4 +172,86 @@ const void *fdt_getprop(const void *fdt, int nodeoffset, const char *name,
         }
     }
     return NULL;
+}
+
+/**
+ * fdt_first_subnode - Get the first child node offset
+ * @fdt: pointer to the device tree blob
+ * @nodeoffset: offset of the parent node
+ *
+ * Returns the offset of the first child node, or -1 if none.
+ */
+int fdt_first_subnode(const void *fdt, int nodeoffset) {
+    const char *p = (const char *)fdt + nodeoffset;
+
+    uint32_t tag = bswap32(*(uint32_t *)p);
+    if (tag != FDT_BEGIN_NODE)
+        return -1;
+    p += 4; // Skip tag
+    p = (const char *)align_up(p + strlen(p) + 1,
+                               4); // Skip node name and align
+
+    /* Skip properties until we find a child node */
+    while (1) {
+        tag = bswap32(*(uint32_t *)p);
+        if (tag == FDT_PROP) {
+            p += 4;
+            uint32_t prop_len = bswap32(*(uint32_t *)p);
+            p += 8; // skip len and nameoff
+            p = (const char *)align_up(p + prop_len, 4);
+        } else if (tag == FDT_NOP) {
+            p += 4;
+        } else if (tag == FDT_BEGIN_NODE) {
+            return (int)(p - (const char *)fdt);
+        } else {
+            /* FDT_END_NODE or FDT_END means no children */
+            return -1;
+        }
+    }
+}
+
+/**
+ * fdt_next_subnode - Get the next sibling node offset
+ * @fdt: pointer to the device tree blob
+ * @nodeoffset: offset of the current node
+ *
+ * Returns the offset of the next sibling node, or -1 if none.
+ */
+int fdt_next_subnode(const void *fdt, int nodeoffset) {
+    const char *p = (const char *)fdt + nodeoffset;
+    int depth = 0;
+
+    uint32_t tag = bswap32(*(uint32_t *)p);
+    if (tag != FDT_BEGIN_NODE)
+        return -1;
+
+    /* Skip the current node entirely (including all its children) */
+    while (1) {
+        tag = bswap32(*(uint32_t *)p);
+        if (tag == FDT_BEGIN_NODE) {
+            depth++;
+            p += 4;
+            p = (const char *)align_up(p + strlen(p) + 1, 4);
+        } else if (tag == FDT_PROP) {
+            p += 4;
+            uint32_t prop_len = bswap32(*(uint32_t *)p);
+            p += 8;
+            p = (const char *)align_up(p + prop_len, 4);
+        } else if (tag == FDT_NOP) {
+            p += 4;
+        } else if (tag == FDT_END_NODE) {
+            depth--;
+            p += 4;
+            if (depth == 0) {
+                /* We've exited the current node, look for next sibling */
+                tag = bswap32(*(uint32_t *)p);
+                if (tag == FDT_BEGIN_NODE) {
+                    return (int)(p - (const char *)fdt);
+                }
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
 }

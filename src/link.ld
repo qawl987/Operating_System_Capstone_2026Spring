@@ -8,6 +8,7 @@ SECTIONS
 {
     . = 0x80200000;
     
+    _kernel_start = .;
     _load_start = .;
     
     .text : {
@@ -32,6 +33,7 @@ SECTIONS
     
     /* Stack space */
     . = . + 0x4000;
+    _kernel_end = .;
     _end = .;
     
     /* Calculate size for relocation */
