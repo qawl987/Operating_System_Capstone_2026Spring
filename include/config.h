@@ -14,4 +14,10 @@
 /* Common definitions */
 #define BOOT_MAGIC 0x544F4F42 /* "BOOT" in hex */
 
+/* Linker script symbols */
+extern char _kernel_start[];
+extern char _kernel_end[];
+extern char _load_start[];
+extern char _load_end[];
+
 #endif /* CONFIG_H */

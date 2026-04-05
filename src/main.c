@@ -1,5 +1,6 @@
 #include "bootloader.h"
 #include "buddy.h"
+#include "config.h"
 #include "dtbParser.h"
 #include "helper.h"
 #include "initrd.h"
@@ -7,10 +8,6 @@
 #include "sbi.h"
 #include "startup_alloc.h"
 #include "uart.h"
-
-/* Linker symbols for kernel boundaries */
-extern char _kernel_start[];
-extern char _kernel_end[];
 
 /* Global state for initrd addresses */
 static unsigned long g_initrd_start = 0;
@@ -99,6 +96,12 @@ static void memory_init_with_startup_alloc(void *dtb_base,
     unsigned long kernel_size = kernel_end - kernel_start;
     printf("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end);
     startup_add_reserved(kernel_start, kernel_size);
+
+    /* Reserve bootloader relocation area */
+    unsigned long reloc_size = (unsigned long)_load_end - (unsigned long)_load_start;
+    printf("Reserving RELOC area: 0x%x - 0x%x\n", 
+           (unsigned long)RELOC_ADDR, (unsigned long)RELOC_ADDR + reloc_size);
+    startup_add_reserved(RELOC_ADDR, reloc_size);
 
     /* Reserve Initramfs (if present) */
     if (initrd_start && initrd_end && initrd_end > initrd_start) {

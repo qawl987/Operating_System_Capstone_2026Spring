@@ -412,9 +412,10 @@ static void log_reserve(unsigned long start, unsigned long end) {
 }
 
 /**
- * Reserve a memory region by removing pages from free lists
- * Algorithm: iterate from MAX_ORDER down to 0, split blocks that overlap
- * with reserved region until all overlapping pages are removed.
+ * Deprecated Now! Use startup allocator instead. Reserve a memory region by
+ * removing pages from free lists Algorithm: iterate from MAX_ORDER down to 0,
+ * split blocks that overlap with reserved region until all overlapping pages
+ * are removed.
  */
 void memory_reserve(unsigned long start, unsigned long size) {
     unsigned long end = start + size;
