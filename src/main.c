@@ -5,6 +5,7 @@
 #include "initrd.h"
 #include "kmalloc.h"
 #include "sbi.h"
+#include "startup_alloc.h"
 #include "uart.h"
 
 /* Linker symbols for kernel boundaries */
@@ -16,9 +17,9 @@ static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
 
 /**
- * Parse /reserved-memory node and reserve all child regions
+ * Parse /reserved-memory node and add regions to startup allocator
  */
-static void parse_reserved_memory(void *dtb_base) {
+static void parse_reserved_memory_startup(void *dtb_base) {
     int parent_offset = fdt_path_offset(dtb_base, "/reserved-memory");
     if (parent_offset < 0) {
         uart_puts("No /reserved-memory node found\n");
@@ -35,11 +36,12 @@ static void parse_reserved_memory(void *dtb_base) {
         if (reg && len >= 16) {
             const uint32_t *cells = (const uint32_t *)reg;
             /* reg = <addr_hi addr_lo size_hi size_lo> */
-            unsigned long addr = ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
-            unsigned long size = ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
+            unsigned long addr =
+                ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
+            unsigned long size =
+                ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
 
-            printf("  Reserving region: 0x%x - 0x%x\n", addr, addr + size);
-            memory_reserve(addr, size);
+            startup_add_reserved(addr, size);
         }
 
         child_offset = fdt_next_subnode(dtb_base, child_offset);
@@ -47,16 +49,16 @@ static void parse_reserved_memory(void *dtb_base) {
 }
 
 /**
- * Initialize memory with reservations from DTB
- * Parses DTB to get memory region and reserves:
- * 1. DTB blob
- * 2. Kernel image
- * 3. Initramfs (if present)
- * 4. Reserved memory regions (if present)
+ * Initialize memory using startup allocator
+ * 1. Mark all reserved regions (DTB, kernel, initramfs, /reserved-memory)
+ * 2. Initialize startup allocator
+ * 3. Allocate frame array from startup allocator
+ * 4. Initialize buddy system with dynamically allocated frame array
+ * 5. Initialize kmalloc
  */
-static void memory_init_with_reserve(void *dtb_base,
-                                     unsigned long initrd_start,
-                                     unsigned long initrd_end) {
+static void memory_init_with_startup_alloc(void *dtb_base,
+                                           unsigned long initrd_start,
+                                           unsigned long initrd_end) {
     int offset, len;
     const void *prop;
     unsigned long mem_start = 0;
@@ -80,38 +82,70 @@ static void memory_init_with_reserve(void *dtb_base,
         mem_size = 0x80000000UL; /* 2GB default */
     }
 
-    printf("Memory region: 0x%x - 0x%x (%d MB)\n",
-           mem_start, mem_start + mem_size, mem_size / (1024 * 1024));
+    printf("Memory region: 0x%x - 0x%x (%d MB)\n", mem_start,
+           mem_start + mem_size, mem_size / (1024 * 1024));
 
-    /* Initialize buddy system with the memory region */
-    buddy_init(mem_start, mem_size);
+    /* 2. Mark reserved regions BEFORE initializing startup allocator */
 
-    /* 2. Reserve DTB blob */
+    /* Reserve DTB blob */
     unsigned long dtb_start = (unsigned long)dtb_base;
     unsigned long dtb_size = fdt_totalsize(dtb_base);
     printf("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
-    memory_reserve(dtb_start, dtb_size);
+    startup_add_reserved(dtb_start, dtb_size);
 
-    /* 3. Reserve Kernel image */
+    /* Reserve Kernel image */
     unsigned long kernel_start = (unsigned long)_kernel_start;
     unsigned long kernel_end = (unsigned long)_kernel_end;
     unsigned long kernel_size = kernel_end - kernel_start;
     printf("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end);
-    memory_reserve(kernel_start, kernel_size);
+    startup_add_reserved(kernel_start, kernel_size);
 
-    /* 4. Reserve Initramfs (if present) */
+    /* Reserve Initramfs (if present) */
     if (initrd_start && initrd_end && initrd_end > initrd_start) {
         printf("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start, initrd_end);
-        memory_reserve(initrd_start, initrd_end - initrd_start);
+        startup_add_reserved(initrd_start, initrd_end - initrd_start);
     }
 
-    /* 5. Parse and reserve /reserved-memory regions */
-    parse_reserved_memory(dtb_base);
+    /* Parse and reserve /reserved-memory regions */
+    parse_reserved_memory_startup(dtb_base);
 
-    /* Initialize dynamic allocator */
+    /* 3. Initialize startup allocator */
+    startup_init(mem_start, mem_size);
+    startup_dump();
+
+    /* 4. Calculate frame array size and allocate it */
+    unsigned long total_pages = mem_size / PAGE_SIZE;
+    unsigned long frame_array_size = get_frame_array_size(total_pages);
+    /* Round up to page size */
+    frame_array_size = (frame_array_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    unsigned long array_pages = frame_array_size / PAGE_SIZE;
+
+    printf("Frame array: %d pages (%d KB) for %d total pages\n", array_pages,
+           frame_array_size / 1024, total_pages);
+
+    struct frame *frame_array =
+        (struct frame *)startup_alloc(frame_array_size, PAGE_SIZE);
+    if (!frame_array) {
+        uart_puts("[!] Failed to allocate frame array!\n");
+        return;
+    }
+
+    /* Also mark the frame array itself as reserved in startup allocator's
+     * tracking */
+    startup_add_reserved((unsigned long)frame_array, frame_array_size);
+
+    /* 5. Get the current bump pointer position - everything up to here is
+     * reserved */
+    unsigned long reserved_end = startup_get_current();
+
+    /* 6. Initialize buddy system with the dynamically allocated frame array */
+    buddy_init_with_frame_array(mem_start, mem_size, frame_array, array_pages,
+                                reserved_end);
+
+    /* 7. Initialize dynamic allocator */
     kmalloc_init();
 
-    uart_puts("Memory initialization complete.\n");
+    uart_puts("Memory initialization complete (startup allocator).\n");
     buddy_dump();
 }
 
@@ -162,15 +196,17 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     uart_puts("\n========================================\n");
     uart_puts("Starting kernel ...\n");
     uart_puts("========================================\n");
-    printf("DTB: 0x%x (size: %d bytes)\n", (unsigned long)dtb_base, fdt_totalsize(dtb_base));
-    printf("Kernel: 0x%x - 0x%x\n", (unsigned long)_kernel_start, (unsigned long)_kernel_end);
+    printf("DTB: 0x%x (size: %d bytes)\n", (unsigned long)dtb_base,
+           fdt_totalsize(dtb_base));
+    printf("Kernel: 0x%x - 0x%x\n", (unsigned long)_kernel_start,
+           (unsigned long)_kernel_end);
     if (g_initrd_start && g_initrd_end) {
         printf("Initrd: 0x%x - 0x%x\n", g_initrd_start, g_initrd_end);
     }
     uart_puts("========================================\n\n");
 
-    /* Initialize memory system with reservations at startup */
-    memory_init_with_reserve(dtb_base, g_initrd_start, g_initrd_end);
+    /* Initialize memory system using startup allocator */
+    memory_init_with_startup_alloc(dtb_base, g_initrd_start, g_initrd_end);
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
     int cmd_idx = 0;
@@ -231,16 +267,15 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 alloc_test();
             } else if (strcmp(cmd_buf, "ls") == 0) {
                 if (g_initrd_start && g_initrd_end) {
-                    initrd_list((void *)g_initrd_start,
-                                (void *)g_initrd_end);
+                    initrd_list((void *)g_initrd_start, (void *)g_initrd_end);
                 } else {
                     printf("No initrd loaded.\r\n");
                 }
             } else if (strncmp(cmd_buf, "cat ", 4) == 0) {
                 if (g_initrd_start && g_initrd_end) {
                     const char *filename = cmd_buf + 4;
-                    initrd_cat((void *)g_initrd_start,
-                               (void *)g_initrd_end, filename);
+                    initrd_cat((void *)g_initrd_start, (void *)g_initrd_end,
+                               filename);
                 } else {
                     printf("No initrd loaded.\r\n");
                 }

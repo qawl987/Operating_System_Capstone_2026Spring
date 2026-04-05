@@ -64,9 +64,36 @@ int get_page_chunk_size(int page_idx);
  * @start: Start physical address
  * @size:  Size in bytes
  *
- * Marks pages in [start, start+size) as reserved, removing them from free lists.
- * Must be called after buddy_init().
+ * Marks pages in [start, start+size) as reserved, removing them from free
+ * lists. Must be called after buddy_init().
  */
 void memory_reserve(unsigned long start, unsigned long size);
+
+/**
+ * buddy_init_with_frame_array - Initialize buddy system with external frame
+ * array
+ * @base_addr:   Base address of managed memory
+ * @size:        Size of managed memory in bytes
+ * @frame_array: Pointer to pre-allocated frame array
+ * @array_pages: Number of pages used by the frame array (to mark as reserved)
+ * @reserved_end: End of the startup allocator's reserved region
+ *
+ * This function is used with the startup allocator to dynamically allocate
+ * the frame array before initializing the buddy system.
+ */
+void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
+                                 struct frame *frame_array,
+                                 unsigned long array_pages,
+                                 unsigned long reserved_end);
+
+/**
+ * get_frame_array_size - Calculate the size needed for the frame array
+ * @num_pages: Total number of pages to manage
+ *
+ * Returns the size in bytes needed for the frame array.
+ */
+static inline unsigned long get_frame_array_size(unsigned long num_pages) {
+    return num_pages * sizeof(struct frame);
+}
 
 #endif /* _BUDDY_H */

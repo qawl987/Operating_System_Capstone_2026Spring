@@ -13,8 +13,13 @@
 #define MAX_MEM_SIZE 0x80000000UL /* 2 GB */
 #define MAX_NUM_PAGES (MAX_MEM_SIZE / PAGE_SIZE)
 
-/* Frame array - represents all page frames */
-static struct frame mem_map[MAX_NUM_PAGES];
+/*
+ * Frame array - can be statically or dynamically allocated
+ * When using startup allocator, mem_map_ptr points to dynamically allocated
+ * array Otherwise, it points to the static array for backwards compatibility
+ */
+static struct frame static_mem_map[MAX_NUM_PAGES];
+static struct frame *mem_map = static_mem_map; /* Default to static array */
 
 /* Free area lists - one list per order */
 static struct list_head free_area[MAX_ORDER + 1];
@@ -22,6 +27,9 @@ static struct list_head free_area[MAX_ORDER + 1];
 /* Base address and size of managed memory */
 static unsigned long mem_base = 0;
 static unsigned long num_pages = 0;
+
+/* Whether using dynamic frame array */
+static int using_dynamic_array = 0;
 
 /* Helper macros */
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -121,6 +129,8 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
 
     mem_base = base_addr;
     num_pages = init_num_pages;
+    mem_map = static_mem_map; /* Use static array */
+    using_dynamic_array = 0;
 
     /* Initialize all free area lists */
     for (i = 0; i <= MAX_ORDER; i++) {
@@ -145,6 +155,92 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
     uart_puts("Buddy system initialized: ");
     uart_puti(num_pages);
     uart_puts(" pages, base=0x");
+    uart_putx(base_addr);
+    uart_puts("\n");
+}
+
+/**
+ * Initialize buddy system with externally allocated frame array
+ * Used by the startup allocator for dynamic frame array allocation
+ */
+void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
+                                 struct frame *frame_array,
+                                 unsigned long array_pages,
+                                 unsigned long reserved_end) {
+    unsigned long i;
+    unsigned long init_num_pages = size / PAGE_SIZE;
+
+    /* Limit to maximum supported pages */
+    if (init_num_pages > MAX_NUM_PAGES) {
+        init_num_pages = MAX_NUM_PAGES;
+        uart_puts("[!] Memory limited to ");
+        uart_puti(MAX_NUM_PAGES);
+        uart_puts(" pages\n");
+    }
+
+    mem_base = base_addr;
+    num_pages = init_num_pages;
+    mem_map = frame_array; /* Use dynamically allocated array */
+    using_dynamic_array = 1;
+
+    uart_puts("[Buddy] Using dynamic frame array at 0x");
+    uart_putx((unsigned long)frame_array);
+    uart_puts(" (");
+    uart_puti(array_pages);
+    uart_puts(" pages)\n");
+
+    /* Initialize all free area lists */
+    for (i = 0; i <= MAX_ORDER; i++) {
+        INIT_LIST_HEAD(&free_area[i]);
+    }
+
+    /* Initialize all frames */
+    for (i = 0; i < num_pages; i++) {
+        mem_map[i].order = FRAME_FREE;
+        mem_map[i].refcount = 0;
+        mem_map[i].chunk_size = 0;
+        INIT_LIST_HEAD(&mem_map[i].list);
+    }
+
+    /*
+     * Calculate which pages are used by the frame array and
+     * mark pages before reserved_end as allocated (these include
+     * kernel, DTB, initramfs, frame array itself, etc.)
+     */
+    unsigned long reserved_pages = 0;
+    if (reserved_end > base_addr) {
+        reserved_pages = (reserved_end - base_addr + PAGE_SIZE - 1) / PAGE_SIZE;
+    }
+
+    uart_puts("[Buddy] Marking first ");
+    uart_puti(reserved_pages);
+    uart_puts(" pages as reserved (up to 0x");
+    uart_putx(reserved_end);
+    uart_puts(")\n");
+
+    /* Mark reserved pages as allocated */
+    for (i = 0; i < reserved_pages && i < num_pages; i++) {
+        mem_map[i].order = FRAME_ALLOCATED;
+        mem_map[i].refcount = 1;
+    }
+
+    /* Add remaining max-order blocks to the free list */
+    /* Start from the first max-order aligned page after reserved region */
+    unsigned long first_free =
+        ((reserved_pages + (1 << MAX_ORDER) - 1) / (1 << MAX_ORDER)) *
+        (1 << MAX_ORDER);
+
+    for (i = first_free; i < num_pages; i += (1 << MAX_ORDER)) {
+        mem_map[i].order = MAX_ORDER;
+        list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
+        log_add_to_free(i, MAX_ORDER);
+    }
+
+    uart_puts("Buddy system initialized with dynamic array: ");
+    uart_puti(num_pages);
+    uart_puts(" total pages, ");
+    uart_puti(num_pages - reserved_pages);
+    uart_puts(" free, base=0x");
     uart_putx(base_addr);
     uart_puts("\n");
 }
@@ -325,7 +421,8 @@ void memory_reserve(unsigned long start, unsigned long size) {
 
     /* Convert to page frame numbers relative to mem_base */
     if (start < mem_base) {
-        if (end <= mem_base) return;  /* Region is below managed memory */
+        if (end <= mem_base)
+            return; /* Region is below managed memory */
         start = mem_base;
     }
     if (end > mem_base + (unsigned long)num_pages * PAGE_SIZE) {
@@ -335,7 +432,8 @@ void memory_reserve(unsigned long start, unsigned long size) {
     unsigned long start_pfn = (start - mem_base) / PAGE_SIZE;
     unsigned long end_pfn = (end - mem_base + PAGE_SIZE - 1) / PAGE_SIZE;
 
-    if (start_pfn >= end_pfn) return;
+    if (start_pfn >= end_pfn)
+        return;
 
     log_reserve(start, end);
 
@@ -382,7 +480,8 @@ void memory_reserve(unsigned long start, unsigned long size) {
                 list_add_tail(&buddy->list, &free_area[next_order]);
                 log_add_to_free(buddy_pfn, next_order);
             } else {
-                /* order 0 with partial overlap means this single page overlaps */
+                /* order 0 with partial overlap means this single page overlaps
+                 */
                 list_del_init(&curr->list);
                 curr->order = FRAME_ALLOCATED;
                 curr->refcount = 1;
