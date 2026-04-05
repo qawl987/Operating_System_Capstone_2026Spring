@@ -3,6 +3,7 @@
 #include "dtbParser.h"
 #include "helper.h"
 #include "initrd.h"
+#include "kmalloc.h"
 #include "sbi.h"
 #include "uart.h"
 
@@ -98,6 +99,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                        "  info      - print system info.\r\n"
                        "  load      - load kernel via UART.\r\n"
                        "  buddy     - test buddy system allocator.\r\n"
+                       "  kmalloc   - test dynamic memory allocator.\r\n"
+                       "  alloc_test- run spec test case (test_alloc_1).\r\n"
                        "  ls        - list files in initrd.\r\n"
                        "  cat <file>- display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -113,6 +116,14 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "buddy") == 0) {
                 buddy_test();
+            } else if (strcmp(cmd_buf, "kmalloc") == 0) {
+                buddy_init(0x90000000UL, 0x10000000UL);
+                kmalloc_init();
+                kmalloc_test();
+            } else if (strcmp(cmd_buf, "alloc_test") == 0) {
+                buddy_init(0x90000000UL, 0x10000000UL);
+                kmalloc_init();
+                alloc_test();
             } else if (strcmp(cmd_buf, "ls") == 0) {
                 if (initrd_start_addr && initrd_end_addr) {
                     initrd_list((void *)initrd_start_addr,

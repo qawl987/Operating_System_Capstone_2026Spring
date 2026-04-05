@@ -9,7 +9,9 @@
 #include "uart.h"
 
 /* Hardcoded memory region for Basic Exercise */
-#define MEM_BASE 0x10000000UL
+/* QEMU virt: RAM starts at 0x80000000 */
+/* Use a safe region that doesn't conflict with kernel */
+#define MEM_BASE 0x90000000UL
 #define MEM_SIZE 0x10000000UL /* 256 MB */
 #define NUM_PAGES (MEM_SIZE / PAGE_SIZE)
 
@@ -121,6 +123,7 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
     for (i = 0; i < num_pages; i++) {
         mem_map[i].order = FRAME_FREE;
         mem_map[i].refcount = 0;
+        mem_map[i].chunk_size = 0;
         INIT_LIST_HEAD(&mem_map[i].list);
     }
 
@@ -273,6 +276,25 @@ unsigned long page_to_addr(int page_idx) {
  * Get page index from physical address
  */
 int addr_to_page(unsigned long addr) { return (addr - mem_base) / PAGE_SIZE; }
+
+/**
+ * Set chunk size for a page (used by kmalloc)
+ */
+void set_page_chunk_size(int page_idx, int chunk_size) {
+    if (page_idx >= 0 && page_idx < NUM_PAGES) {
+        mem_map[page_idx].chunk_size = chunk_size;
+    }
+}
+
+/**
+ * Get chunk size for a page (used by kfree)
+ */
+int get_page_chunk_size(int page_idx) {
+    if (page_idx >= 0 && page_idx < NUM_PAGES) {
+        return mem_map[page_idx].chunk_size;
+    }
+    return 0;
+}
 
 /**
  * Debug: dump free area status

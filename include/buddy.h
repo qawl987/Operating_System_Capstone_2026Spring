@@ -17,15 +17,18 @@
 
 /**
  * struct frame - Represents a page frame
- * @order:    If >= 0, this is the head of a free block of 2^order pages
- *            If FRAME_FREE, this frame is part of a larger block
- *            If FRAME_ALLOCATED, this frame is allocated
- * @refcount: Reference count for the frame
- * @list:     Linked list node for free_area
+ * @order:      If >= 0, this is the head of a free block of 2^order pages
+ *              If FRAME_FREE, this frame is part of a larger block
+ *              If FRAME_ALLOCATED, this frame is allocated
+ * @refcount:   Reference count for the frame
+ * @chunk_size: If > 0, this page is used as a chunk pool with this chunk size
+ *              If 0, this page is allocated as a whole page
+ * @list:       Linked list node for free_area
  */
 struct frame {
     int order;
     int refcount;
+    int chunk_size;
     struct list_head list;
 };
 
@@ -49,5 +52,11 @@ void buddy_dump(void);
 
 /* Test function */
 void buddy_test(void);
+
+/* Set chunk size for a page (used by kmalloc) */
+void set_page_chunk_size(int page_idx, int chunk_size);
+
+/* Get chunk size for a page (used by kfree) */
+int get_page_chunk_size(int page_idx);
 
 #endif /* _BUDDY_H */

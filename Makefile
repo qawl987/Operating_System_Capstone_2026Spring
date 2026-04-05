@@ -8,7 +8,7 @@ TARGET = kernel
 
 # Source files
 SRC_DIR = src
-SRCS_C = $(SRC_DIR)/main.c $(SRC_DIR)/uart.c $(SRC_DIR)/bootloader.c $(SRC_DIR)/dtbParser.c $(SRC_DIR)/helper.c $(SRC_DIR)/initrd.c $(SRC_DIR)/sbi.c $(SRC_DIR)/buddy.c
+SRCS_C = $(SRC_DIR)/main.c $(SRC_DIR)/uart.c $(SRC_DIR)/bootloader.c $(SRC_DIR)/dtbParser.c $(SRC_DIR)/helper.c $(SRC_DIR)/initrd.c $(SRC_DIR)/sbi.c $(SRC_DIR)/buddy.c $(SRC_DIR)/kmalloc.c
 SRCS_S = $(SRC_DIR)/start.S
 
 build: clean
