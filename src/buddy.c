@@ -6,6 +6,8 @@
  */
 
 #include "buddy.h"
+#include "config.h"
+#include "logger.h"
 #include "uart.h"
 
 /* Maximum supported memory size (2 GB for full QEMU virt memory) */
@@ -43,75 +45,6 @@ static inline int get_buddy_idx(int idx, unsigned int order) {
 }
 
 /**
- * Print log message for adding block to free list
- */
-static void log_add_to_free(int idx, int order) {
-    uart_puts("[+] Add page ");
-    uart_puti(idx);
-    uart_puts(" to order ");
-    uart_puti(order);
-    uart_puts(". Range: [");
-    uart_puti(idx);
-    uart_puts(", ");
-    uart_puti(idx + (1 << order) - 1);
-    uart_puts("]\n");
-}
-
-/**
- * Print log message for removing block from free list
- */
-static void log_remove_from_free(int idx, int order) {
-    uart_puts("[-] Remove page ");
-    uart_puti(idx);
-    uart_puts(" from order ");
-    uart_puti(order);
-    uart_puts(". Range: [");
-    uart_puti(idx);
-    uart_puts(", ");
-    uart_puti(idx + (1 << order) - 1);
-    uart_puts("]\n");
-}
-
-/**
- * Print log message for buddy found during merge
- */
-static void log_buddy_found(int buddy_idx, int page_idx, int order) {
-    uart_puts("[*] Buddy found! buddy idx: ");
-    uart_puti(buddy_idx);
-    uart_puts(" for page ");
-    uart_puti(page_idx);
-    uart_puts(" with order ");
-    uart_puti(order);
-    uart_puts("\n");
-}
-
-/**
- * Print log message for allocation
- */
-static void log_alloc(unsigned long addr, int order, int idx) {
-    uart_puts("[Page] Allocate 0x");
-    uart_putx(addr);
-    uart_puts(" at order ");
-    uart_puti(order);
-    uart_puts(", page ");
-    uart_puti(idx);
-    uart_puts("\n");
-}
-
-/**
- * Print log message for free
- */
-static void log_free(unsigned long addr, int order, int idx) {
-    uart_puts("[Page] Free 0x");
-    uart_putx(addr);
-    uart_puts(" and add back to order ");
-    uart_puti(order);
-    uart_puts(", page ");
-    uart_puti(idx);
-    uart_puts("\n");
-}
-
-/**
  * Initialize the buddy system
  * Sets up the frame array and free lists
  */
@@ -122,9 +55,7 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
     /* Limit to maximum supported pages */
     if (init_num_pages > MAX_NUM_PAGES) {
         init_num_pages = MAX_NUM_PAGES;
-        uart_puts("[!] Memory limited to ");
-        uart_puti(MAX_NUM_PAGES);
-        uart_puts(" pages\n");
+        log_info("[!] Memory limited to %d pages\n", MAX_NUM_PAGES);
     }
 
     mem_base = base_addr;
@@ -149,14 +80,12 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
     for (i = 0; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
-        log_add_to_free(i, MAX_ORDER);
+        log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,
+                 MAX_ORDER, (int)i, (int)(i + (1 << MAX_ORDER) - 1));
     }
 
-    uart_puts("Buddy system initialized: ");
-    uart_puti(num_pages);
-    uart_puts(" pages, base=0x");
-    uart_putx(base_addr);
-    uart_puts("\n");
+    log_info("Buddy system initialized: %d pages, base=0x%x\n", (int)num_pages,
+             base_addr);
 }
 
 /**
@@ -173,9 +102,7 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
     /* Limit to maximum supported pages */
     if (init_num_pages > MAX_NUM_PAGES) {
         init_num_pages = MAX_NUM_PAGES;
-        uart_puts("[!] Memory limited to ");
-        uart_puti(MAX_NUM_PAGES);
-        uart_puts(" pages\n");
+        log_info("[!] Memory limited to %d pages\n", MAX_NUM_PAGES);
     }
 
     mem_base = base_addr;
@@ -183,11 +110,8 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
     mem_map = frame_array; /* Use dynamically allocated array */
     using_dynamic_array = 1;
 
-    uart_puts("[Buddy] Using dynamic frame array at 0x");
-    uart_putx((unsigned long)frame_array);
-    uart_puts(" (");
-    uart_puti(array_pages);
-    uart_puts(" pages)\n");
+    log_info("[Buddy] Using dynamic frame array at 0x%x (%d pages)\n",
+             (unsigned long)frame_array, (int)array_pages);
 
     /* Initialize all free area lists */
     for (i = 0; i <= MAX_ORDER; i++) {
@@ -212,11 +136,8 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
         reserved_pages = (reserved_end - base_addr + PAGE_SIZE - 1) / PAGE_SIZE;
     }
 
-    uart_puts("[Buddy] Marking first ");
-    uart_puti(reserved_pages);
-    uart_puts(" pages as reserved (up to 0x");
-    uart_putx(reserved_end);
-    uart_puts(")\n");
+    log_info("[Buddy] Marking first %d pages as reserved (up to 0x%x)\n",
+             (int)reserved_pages, reserved_end);
 
     /* Mark reserved pages as allocated */
     for (i = 0; i < reserved_pages && i < num_pages; i++) {
@@ -233,16 +154,13 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
     for (i = first_free; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
-        log_add_to_free(i, MAX_ORDER);
+        log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,
+                 MAX_ORDER, (int)i, (int)(i + (1 << MAX_ORDER) - 1));
     }
 
-    uart_puts("Buddy system initialized with dynamic array: ");
-    uart_puti(num_pages);
-    uart_puts(" total pages, ");
-    uart_puti(num_pages - reserved_pages);
-    uart_puts(" free, base=0x");
-    uart_putx(base_addr);
-    uart_puts("\n");
+    log_info("Buddy system initialized with dynamic array: %d total pages, %d "
+             "free, base=0x%x\n",
+             (int)num_pages, (int)(num_pages - reserved_pages), base_addr);
 }
 
 /**
@@ -265,9 +183,7 @@ int alloc_pages(unsigned int order) {
 
     /* No available block found */
     if (current_order == -1) {
-        uart_puts("[!] alloc_pages: out of memory for order ");
-        uart_puti(order);
-        uart_puts("\n");
+        log_info("[!] alloc_pages: out of memory for order %d\n", order);
         return -1;
     }
 
@@ -275,7 +191,8 @@ int alloc_pages(unsigned int order) {
     page = list_first_entry(&free_area[current_order], struct frame, list);
     idx = page - mem_map;
     list_del_init(&page->list);
-    log_remove_from_free(idx, current_order);
+    log_spec("[-] Remove page %d from order %d. Range: [%d, %d]\n", idx,
+             current_order, idx, idx + (1 << current_order) - 1);
 
     /* Split the block until we reach the requested order */
     while (current_order > (int)order) {
@@ -287,24 +204,20 @@ int alloc_pages(unsigned int order) {
 
         buddy->order = current_order;
         list_add_tail(&buddy->list, &free_area[current_order]);
-        log_add_to_free(buddy_idx, current_order);
+        log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", buddy_idx,
+                 current_order, buddy_idx,
+                 buddy_idx + (1 << current_order) - 1);
 
         /* Update the lower half */
         page->order = current_order;
     }
 
     /* Mark as allocated */
-    page->order = FRAME_ALLOCATED;
-    page->refcount = 1;
-
-    /* Store the original order in a way we can retrieve it */
-    /* We'll use a simple approach: store order in refcount's high bits
-     * temporarily */
-    /* Actually, let's just keep track of the order during allocation */
     page->order = order; /* We'll set it back for free to know the size */
     page->refcount = 1;
 
-    log_alloc(page_to_addr(idx), order, idx);
+    log_spec("[Page] Allocate 0x%x at order %d, page %d\n", page_to_addr(idx),
+             order, idx);
 
     return idx;
 }
@@ -331,7 +244,7 @@ void free_pages(int page_idx) {
         int buddy_idx = get_buddy_idx(cur_idx, current_order);
 
         /* Check if buddy exists within bounds */
-        if (buddy_idx < 0 || buddy_idx >= num_pages) {
+        if (buddy_idx < 0 || buddy_idx >= (int)num_pages) {
             break;
         }
 
@@ -342,11 +255,14 @@ void free_pages(int page_idx) {
             break;
         }
 
-        log_buddy_found(buddy_idx, cur_idx, current_order);
+        log_spec("[*] Buddy found! buddy idx: %d for page %d with order %d\n",
+                 buddy_idx, cur_idx, current_order);
 
         /* Remove buddy from its free list */
         list_del_init(&buddy->list);
-        log_remove_from_free(buddy_idx, current_order);
+        log_spec("[-] Remove page %d from order %d. Range: [%d, %d]\n",
+                 buddy_idx, current_order, buddy_idx,
+                 buddy_idx + (1 << current_order) - 1);
 
         /* Mark buddy as part of larger block */
         buddy->order = FRAME_FREE;
@@ -365,8 +281,10 @@ void free_pages(int page_idx) {
     page->refcount = 0;
     list_add_tail(&page->list, &free_area[current_order]);
 
-    log_free(page_to_addr(page_idx), current_order, cur_idx);
-    log_add_to_free(cur_idx, current_order);
+    log_spec("[Page] Free 0x%x and add back to order %d, page %d\n",
+             page_to_addr(page_idx), current_order, cur_idx);
+    log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", cur_idx,
+             current_order, cur_idx, cur_idx + (1 << current_order) - 1);
 }
 
 /**
@@ -385,7 +303,7 @@ int addr_to_page(unsigned long addr) { return (addr - mem_base) / PAGE_SIZE; }
  * Set chunk size for a page (used by kmalloc)
  */
 void set_page_chunk_size(int page_idx, int chunk_size) {
-    if (page_idx >= 0 && page_idx < num_pages) {
+    if (page_idx >= 0 && page_idx < (int)num_pages) {
         mem_map[page_idx].chunk_size = chunk_size;
     }
 }
@@ -394,21 +312,10 @@ void set_page_chunk_size(int page_idx, int chunk_size) {
  * Get chunk size for a page (used by kfree)
  */
 int get_page_chunk_size(int page_idx) {
-    if (page_idx >= 0 && page_idx < num_pages) {
+    if (page_idx >= 0 && page_idx < (int)num_pages) {
         return mem_map[page_idx].chunk_size;
     }
     return 0;
-}
-
-/**
- * Log message for memory reservation
- */
-static void log_reserve(unsigned long start, unsigned long end) {
-    uart_puts("[Reserve] Reserve address [0x");
-    uart_putx(start);
-    uart_puts(", 0x");
-    uart_putx(end);
-    uart_puts(")\n");
 }
 
 /**
@@ -436,7 +343,7 @@ void memory_reserve(unsigned long start, unsigned long size) {
     if (start_pfn >= end_pfn)
         return;
 
-    log_reserve(start, end);
+    log_spec("[Reserve] Reserve address [0x%x, 0x%x)\n", start, end);
 
     /* Iterate from MAX_ORDER down to 0 */
     for (int order = MAX_ORDER; order >= 0; order--) {
@@ -457,14 +364,18 @@ void memory_reserve(unsigned long start, unsigned long size) {
                 list_del_init(&curr->list);
                 curr->order = FRAME_ALLOCATED;
                 curr->refcount = 1;
-                log_remove_from_free(block_start_pfn, order);
+                log_spec("[-] Remove page %d from order %d. Range: [%d, %d]\n",
+                         (int)block_start_pfn, order, (int)block_start_pfn,
+                         (int)(block_start_pfn + (1 << order) - 1));
                 continue;
             }
 
             /* Case 3: Partial overlap - split the block */
             if (order > 0) {
                 list_del_init(&curr->list);
-                log_remove_from_free(block_start_pfn, order);
+                log_spec("[-] Remove page %d from order %d. Range: [%d, %d]\n",
+                         (int)block_start_pfn, order, (int)block_start_pfn,
+                         (int)(block_start_pfn + (1 << order) - 1));
 
                 int next_order = order - 1;
                 unsigned long buddy_pfn = block_start_pfn + (1 << next_order);
@@ -472,21 +383,27 @@ void memory_reserve(unsigned long start, unsigned long size) {
                 /* Add the lower half */
                 curr->order = next_order;
                 list_add_tail(&curr->list, &free_area[next_order]);
-                log_add_to_free(block_start_pfn, next_order);
+                log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n",
+                         (int)block_start_pfn, next_order, (int)block_start_pfn,
+                         (int)(block_start_pfn + (1 << next_order) - 1));
 
                 /* Add the upper half (buddy) */
                 struct frame *buddy = &mem_map[buddy_pfn];
                 buddy->order = next_order;
                 INIT_LIST_HEAD(&buddy->list);
                 list_add_tail(&buddy->list, &free_area[next_order]);
-                log_add_to_free(buddy_pfn, next_order);
+                log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n",
+                         (int)buddy_pfn, next_order, (int)buddy_pfn,
+                         (int)(buddy_pfn + (1 << next_order) - 1));
             } else {
                 /* order 0 with partial overlap means this single page overlaps
                  */
                 list_del_init(&curr->list);
                 curr->order = FRAME_ALLOCATED;
                 curr->refcount = 1;
-                log_remove_from_free(block_start_pfn, order);
+                log_spec("[-] Remove page %d from order %d. Range: [%d, %d]\n",
+                         (int)block_start_pfn, order, (int)block_start_pfn,
+                         (int)(block_start_pfn + (1 << order) - 1));
             }
         }
     }
@@ -499,19 +416,14 @@ void buddy_dump(void) {
     int count;
     struct list_head *pos;
 
-    uart_puts("\n=== Buddy System Status ===\n");
+    log_info("\n=== Buddy System Status ===\n");
     for (int i = MAX_ORDER; i >= 0; i--) {
         count = 0;
         list_for_each(pos, &free_area[i]) { count++; }
-        uart_puts("free_area[");
-        uart_puti(i);
-        uart_puts("] = ");
-        uart_puti(count);
-        uart_puts(" blocks (");
-        uart_puti(count * (1 << i));
-        uart_puts(" pages)\n");
+        log_info("free_area[%d] = %d blocks (%d pages)\n", i, count,
+                 count * (1 << i));
     }
-    uart_puts("===========================\n");
+    log_info("===========================\n");
 }
 
 /* ========== Test Code ========== */
@@ -523,35 +435,35 @@ void buddy_dump(void) {
 void buddy_test(void) {
     int p1, p2, p3;
 
-    uart_puts("\n===== Buddy System Test =====\n");
+    printf("\n===== Buddy System Test =====\n");
 
     /* Initialize with hardcoded region */
     buddy_init(TEST_MEM_BASE, TEST_MEM_SIZE);
     buddy_dump();
 
-    uart_puts("\n--- Allocating p1 (order 1) ---\n");
+    printf("\n--- Allocating p1 (order 1) ---\n");
     p1 = alloc_pages(1);
     buddy_dump();
 
-    uart_puts("\n--- Allocating p2 (order 1) ---\n");
+    printf("\n--- Allocating p2 (order 1) ---\n");
     p2 = alloc_pages(1);
     buddy_dump();
 
-    uart_puts("\n--- Allocating p3 (order 1) ---\n");
+    printf("\n--- Allocating p3 (order 1) ---\n");
     p3 = alloc_pages(1);
     buddy_dump();
 
-    uart_puts("\n--- Freeing p1 ---\n");
+    printf("\n--- Freeing p1 ---\n");
     free_pages(p1);
 
-    uart_puts("\n--- Freeing p2 ---\n");
+    printf("\n--- Freeing p2 ---\n");
     free_pages(p2);
 
-    uart_puts("\n--- Freeing p3 ---\n");
+    printf("\n--- Freeing p3 ---\n");
     free_pages(p3);
 
-    uart_puts("\n--- Final Status ---\n");
+    printf("\n--- Final Status ---\n");
     buddy_dump();
 
-    uart_puts("===== Test Complete =====\n");
+    printf("===== Test Complete =====\n");
 }

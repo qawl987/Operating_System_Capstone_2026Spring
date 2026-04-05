@@ -7,6 +7,8 @@
 
 #include "kmalloc.h"
 #include "buddy.h"
+#include "config.h"
+#include "logger.h"
 #include "uart.h"
 
 /* Pool sizes in bytes */
@@ -45,50 +47,6 @@ static unsigned int size_to_order(unsigned int size) {
 }
 
 /**
- * Log message for chunk allocation
- */
-static void log_chunk_alloc(void *addr, unsigned int chunk_size) {
-    uart_puts("[Chunk] Allocate 0x");
-    uart_putx((unsigned long)addr);
-    uart_puts(" at chunk size ");
-    uart_puti(chunk_size);
-    uart_puts("\n");
-}
-
-/**
- * Log message for chunk free
- */
-static void log_chunk_free(void *addr, unsigned int chunk_size) {
-    uart_puts("[Chunk] Free 0x");
-    uart_putx((unsigned long)addr);
-    uart_puts(" at chunk size ");
-    uart_puti(chunk_size);
-    uart_puts("\n");
-}
-
-/**
- * Log message for page allocation via kmalloc
- */
-static void log_page_alloc(void *addr, unsigned int size, unsigned int order) {
-    uart_puts("[Kmalloc] Allocate page 0x");
-    uart_putx((unsigned long)addr);
-    uart_puts(" for size ");
-    uart_puti(size);
-    uart_puts(" (order ");
-    uart_puti(order);
-    uart_puts(")\n");
-}
-
-/**
- * Log message for page free via kfree
- */
-static void log_page_free(void *addr) {
-    uart_puts("[Kmalloc] Free page 0x");
-    uart_putx((unsigned long)addr);
-    uart_puts("\n");
-}
-
-/**
  * Allocate a new page and partition it into chunks for the given pool
  */
 static int expand_pool(int pool_idx) {
@@ -96,13 +54,12 @@ static int expand_pool(int pool_idx) {
     unsigned int chunk_size = pool->chunk_size;
     int page_idx;
     unsigned long page_addr;
-    unsigned int num_chunks;
     unsigned int offset;
 
     /* Allocate a single page from buddy system */
     page_idx = alloc_pages(0);
     if (page_idx < 0) {
-        uart_puts("[!] expand_pool: failed to allocate page\n");
+        log_info("[!] expand_pool: failed to allocate page\n");
         return -1;
     }
 
@@ -111,24 +68,15 @@ static int expand_pool(int pool_idx) {
     /* Mark this page as belonging to this chunk pool */
     set_page_chunk_size(page_idx, chunk_size);
 
-    uart_puts("[Chunk] New page 0x");
-    uart_putx(page_addr);
-    uart_puts(" for pool size ");
-    uart_puti(chunk_size);
-    uart_puts("\n");
+    log_debug("[Chunk] New page 0x%x for pool size %d (%d chunks)\n",
+              page_addr, chunk_size, PAGE_SIZE / chunk_size);
 
     /* Partition the page into chunks */
-    num_chunks = PAGE_SIZE / chunk_size;
-
     for (offset = 0; offset < PAGE_SIZE; offset += chunk_size) {
         struct chunk *c = (struct chunk *)(page_addr + offset);
         INIT_LIST_HEAD(&c->list);
         list_add_tail(&c->list, &pool->free_list);
     }
-
-    uart_puts("[Chunk] Created ");
-    uart_puti(num_chunks);
-    uart_puts(" chunks\n");
 
     return 0;
 }
@@ -137,21 +85,21 @@ static int expand_pool(int pool_idx) {
  * Initialize the dynamic memory allocator
  */
 void kmalloc_init(void) {
-    uart_puts("Initializing dynamic memory allocator...\n");
+    log_info("Initializing dynamic memory allocator...\n");
 
     for (int i = 0; i < NUM_POOL_SIZES; i++) {
         pools[i].chunk_size = pool_sizes[i];
         INIT_LIST_HEAD(&pools[i].free_list);
     }
 
-    uart_puts("Dynamic allocator ready. Pool sizes: ");
+    log_info("Dynamic allocator ready. Pool sizes: ");
     for (int i = 0; i < NUM_POOL_SIZES; i++) {
-        uart_puti(pool_sizes[i]);
+        log_info("%d", pool_sizes[i]);
         if (i < NUM_POOL_SIZES - 1) {
-            uart_puts(", ");
+            log_info(", ");
         }
     }
-    uart_puts("\n");
+    log_info("\n");
 }
 
 /**
@@ -173,7 +121,7 @@ void *kmalloc(unsigned int size) {
 
         /* Check if order is within bounds */
         if (order > MAX_ORDER) {
-            uart_puts("[!] kmalloc: size too large\n");
+            log_info("[!] kmalloc: size too large\n");
             return (void *)0;
         }
 
@@ -183,14 +131,15 @@ void *kmalloc(unsigned int size) {
         }
 
         addr = (void *)page_to_addr(page_idx);
-        log_page_alloc(addr, size, order);
+        log_spec("[Kmalloc] Allocate page 0x%x for size %d (order %d)\n",
+                 (unsigned long)addr, size, order);
         return addr;
     }
 
     /* Find appropriate pool */
     pool_idx = find_pool_index(size);
     if (pool_idx < 0) {
-        uart_puts("[!] kmalloc: invalid size\n");
+        log_info("[!] kmalloc: invalid size\n");
         return (void *)0;
     }
 
@@ -208,7 +157,8 @@ void *kmalloc(unsigned int size) {
     list_del_init(&c->list);
 
     addr = (void *)c;
-    log_chunk_alloc(addr, pool->chunk_size);
+    log_spec("[Chunk] Allocate 0x%x at chunk size %d\n", (unsigned long)addr,
+             pool->chunk_size);
 
     return addr;
 }
@@ -238,19 +188,17 @@ void kfree(void *ptr) {
 
     /* If chunk_size is 0, this was a full page allocation */
     if (chunk_size == 0) {
-        log_page_free(ptr);
+        log_spec("[Kmalloc] Free page 0x%x\n", (unsigned long)ptr);
         free_pages(page_idx);
         return;
     }
 
     /* Find the pool index for this chunk size */
     pool_idx = find_pool_index(chunk_size);
-    if (pool_idx < 0 || pools[pool_idx].chunk_size != (unsigned int)chunk_size) {
-        uart_puts("[!] kfree: invalid chunk size ");
-        uart_puti(chunk_size);
-        uart_puts(" for 0x");
-        uart_putx(addr);
-        uart_puts("\n");
+    if (pool_idx < 0 ||
+        pools[pool_idx].chunk_size != (unsigned int)chunk_size) {
+        log_info("[!] kfree: invalid chunk size %d for 0x%x\n", chunk_size,
+                 addr);
         return;
     }
 
@@ -259,44 +207,45 @@ void kfree(void *ptr) {
     INIT_LIST_HEAD(&c->list);
     list_add_tail(&c->list, &pools[pool_idx].free_list);
 
-    log_chunk_free(ptr, chunk_size);
+    log_spec("[Chunk] Free 0x%x at chunk size %d\n", (unsigned long)ptr,
+             chunk_size);
 }
 
 /**
  * Test function for the dynamic allocator
  */
 void kmalloc_test(void) {
-    uart_puts("\n===== Dynamic Allocator Test =====\n");
+    printf("\n===== Dynamic Allocator Test =====\n");
 
     /* Test small allocations */
-    uart_puts("\n--- Testing small allocations ---\n");
+    printf("\n--- Testing small allocations ---\n");
     char *p1 = (char *)kmalloc(16);
     char *p2 = (char *)kmalloc(32);
     char *p3 = (char *)kmalloc(64);
     char *p4 = (char *)kmalloc(128);
 
-    uart_puts("\n--- Freeing small allocations ---\n");
+    printf("\n--- Freeing small allocations ---\n");
     kfree(p1);
     kfree(p2);
     kfree(p3);
     kfree(p4);
 
     /* Test reuse */
-    uart_puts("\n--- Testing reuse ---\n");
+    printf("\n--- Testing reuse ---\n");
     char *p5 = (char *)kmalloc(16);
     char *p6 = (char *)kmalloc(32);
     kfree(p5);
     kfree(p6);
 
     /* Test large allocations (> MAX_CHUNK_SIZE) */
-    uart_puts("\n--- Testing large allocations ---\n");
+    printf("\n--- Testing large allocations ---\n");
     char *p7 = (char *)kmalloc(4000);
     char *p8 = (char *)kmalloc(8000);
     kfree(p7);
     kfree(p8);
 
     /* Test multiple allocations from same pool */
-    uart_puts("\n--- Testing multiple allocations ---\n");
+    printf("\n--- Testing multiple allocations ---\n");
     void *ptrs[10];
     for (int i = 0; i < 10; i++) {
         ptrs[i] = kmalloc(128);
@@ -305,7 +254,7 @@ void kmalloc_test(void) {
         kfree(ptrs[i]);
     }
 
-    uart_puts("\n===== Test Complete =====\n");
+    printf("\n===== Test Complete =====\n");
 }
 
 /**
@@ -313,13 +262,13 @@ void kmalloc_test(void) {
  * Uses the spec-required allocate/free API
  */
 void alloc_test(void) {
-    /* Define MAX_ALLOC_SIZE based on buddy system limits */
-    /* MAX_ORDER = 10, so max = 2^10 * 4KB = 4MB */
-    #define MAX_ALLOC_SIZE (PAGE_SIZE * (1 << MAX_ORDER))
+/* Define MAX_ALLOC_SIZE based on buddy system limits */
+/* MAX_ORDER = 10, so max = 2^10 * 4KB = 4MB */
+#define MAX_ALLOC_SIZE (PAGE_SIZE * (1 << MAX_ORDER))
 
-    uart_puts("\n===== Spec Test Case (test_alloc_1) =====\n");
+    printf("\n===== Spec Test Case (test_alloc_1) =====\n");
 
-    uart_puts("Testing memory allocation...\n");
+    printf("Testing memory allocation...\n");
     char *ptr1 = (char *)allocate(4000);
     char *ptr2 = (char *)allocate(8000);
     char *ptr3 = (char *)allocate(4000);
@@ -331,7 +280,7 @@ void alloc_test(void) {
     free(ptr4);
 
     /* Test kmalloc */
-    uart_puts("Testing dynamic allocator...\n");
+    printf("Testing dynamic allocator...\n");
     char *kmem_ptr1 = (char *)allocate(16);
     char *kmem_ptr2 = (char *)allocate(32);
     char *kmem_ptr3 = (char *)allocate(64);
@@ -349,7 +298,7 @@ void alloc_test(void) {
     free(kmem_ptr6);
 
     /* Test allocate new page if the cache is not enough */
-    uart_puts("Testing pool expansion (100 x 128 bytes)...\n");
+    printf("Testing pool expansion (100 x 128 bytes)...\n");
     void *kmem_ptr[102];
     for (int i = 0; i < 100; i++) {
         kmem_ptr[i] = (char *)allocate(128);
@@ -359,14 +308,14 @@ void alloc_test(void) {
     }
 
     /* Test exceeding the maximum size */
-    uart_puts("Testing allocation beyond MAX_ALLOC_SIZE...\n");
+    printf("Testing allocation beyond MAX_ALLOC_SIZE...\n");
     char *kmem_ptr7 = (char *)allocate(MAX_ALLOC_SIZE + 1);
     if (kmem_ptr7 == (void *)0) {
-        uart_puts("Allocation failed as expected for size > MAX_ALLOC_SIZE\n");
+        printf("Allocation failed as expected for size > MAX_ALLOC_SIZE\n");
     } else {
-        uart_puts("Unexpected allocation success for size > MAX_ALLOC_SIZE\n");
+        printf("Unexpected allocation success for size > MAX_ALLOC_SIZE\n");
         free(kmem_ptr7);
     }
 
-    uart_puts("\n===== Spec Test Complete =====\n");
+    printf("\n===== Spec Test Complete =====\n");
 }

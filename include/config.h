@@ -1,6 +1,16 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+/*
+ * Log Level Configuration
+ * Change this to control verbosity during demo:
+ * - LOG_LEVEL_NONE  (0): No logs
+ * - LOG_LEVEL_SPEC  (1): Only spec-required logs (for demo)
+ * - LOG_LEVEL_INFO  (2): Spec + initialization info
+ * - LOG_LEVEL_DEBUG (3): All logs (default)
+ */
+#define LOG_LEVEL 1 /* Set to 1 for demo, 3 for development */
+
 #ifdef PLATFORM_QEMU
 /* QEMU virt machine addresses */
 #define LOAD_ADDR 0x80200000ULL

@@ -9,6 +9,7 @@
 #include "dtbParser.h"
 #include "helper.h"
 #include "kmalloc.h"
+#include "logger.h"
 #include "uart.h"
 
 /* Reserved regions array */
@@ -34,7 +35,7 @@ static int ranges_overlap(uint64_t s1, uint64_t e1, uint64_t s2, uint64_t e2) {
  */
 void startup_add_reserved(uint64_t start, uint64_t size) {
     if (num_reserved >= MAX_RESERVED_REGIONS) {
-        uart_puts("[Startup] Warning: too many reserved regions\n");
+        log_info("[Startup] Warning: too many reserved regions\n");
         return;
     }
 
@@ -55,11 +56,8 @@ void startup_add_reserved(uint64_t start, uint64_t size) {
             if (end > reserved_regions[i].end) {
                 reserved_regions[i].end = end;
             }
-            uart_puts("[Startup] Merged reserved region: 0x");
-            uart_putx(reserved_regions[i].start);
-            uart_puts(" - 0x");
-            uart_putx(reserved_regions[i].end);
-            uart_puts("\n");
+            log_info("[Startup] Merged reserved region: 0x%x - 0x%x\n",
+                     reserved_regions[i].start, reserved_regions[i].end);
             return;
         }
     }
@@ -68,13 +66,11 @@ void startup_add_reserved(uint64_t start, uint64_t size) {
     reserved_regions[num_reserved].end = end;
     num_reserved++;
 
-    uart_puts("[Startup] Reserved region: 0x");
-    uart_putx(start);
-    uart_puts(" - 0x");
-    uart_putx(end);
-    uart_puts(" (");
-    uart_puti((unsigned int)(size / 1024));
-    uart_puts(" KB)\n");
+    /* Log reserve for spec requirement */
+    log_spec("[Reserve] Reserve address [0x%x, 0x%x)\n", start, end);
+
+    log_info("[Startup] Reserved region: 0x%x - 0x%x (%d KB)\n", start, end,
+             (unsigned int)(size / 1024));
 }
 
 /**
@@ -125,14 +121,9 @@ void startup_init(uint64_t mem_start, uint64_t mem_size) {
     uint64_t first_usable = find_first_usable(mem_start, mem_region_end);
     bump_ptr = align_up_val(first_usable, 4096);
 
-    uart_puts("[Startup] Initialized: memory 0x");
-    uart_putx(mem_region_start);
-    uart_puts(" - 0x");
-    uart_putx(mem_region_end);
-    uart_puts("\n");
-    uart_puts("[Startup] First usable address: 0x");
-    uart_putx(bump_ptr);
-    uart_puts("\n");
+    log_info("[Startup] Initialized: memory 0x%x - 0x%x\n", mem_region_start,
+             mem_region_end);
+    log_info("[Startup] First usable address: 0x%x\n", bump_ptr);
 }
 
 /**
@@ -172,20 +163,15 @@ void *startup_alloc(uint64_t size, uint64_t align) {
 
     /* Check bounds */
     if (alloc_end > mem_region_end) {
-        uart_puts("[Startup] Error: out of memory\n");
+        log_info("[Startup] Error: out of memory\n");
         return (void *)0;
     }
 
     /* Advance bump pointer */
     bump_ptr = alloc_end;
 
-    uart_puts("[Startup] Allocated 0x");
-    uart_putx(aligned_ptr);
-    uart_puts(" - 0x");
-    uart_putx(alloc_end);
-    uart_puts(" (");
-    uart_puti((unsigned int)(size / 1024));
-    uart_puts(" KB)\n");
+    log_info("[Startup] Allocated 0x%x - 0x%x (%d KB)\n", aligned_ptr,
+             alloc_end, (unsigned int)(size / 1024));
 
     return (void *)aligned_ptr;
 }
@@ -209,84 +195,74 @@ uint64_t startup_get_mem_end(void) { return mem_region_end; }
  * Dump startup allocator status
  */
 void startup_dump(void) {
-    uart_puts("\n=== Startup Allocator Status ===\n");
-    uart_puts("Memory region: 0x");
-    uart_putx(mem_region_start);
-    uart_puts(" - 0x");
-    uart_putx(mem_region_end);
-    uart_puts("\n");
-    uart_puts("Current pointer: 0x");
-    uart_putx(bump_ptr);
-    uart_puts("\n");
-    uart_puts("Reserved regions (");
-    uart_puti(num_reserved);
-    uart_puts("):\n");
+    log_info("\n=== Startup Allocator Status ===\n");
+    log_info("Memory region: 0x%x - 0x%x\n", mem_region_start, mem_region_end);
+    log_info("Current pointer: 0x%x\n", bump_ptr);
+    log_info("Reserved regions (%d):\n", num_reserved);
     for (int i = 0; i < num_reserved; i++) {
-        uart_puts("  [");
-        uart_puti(i);
-        uart_puts("] 0x");
-        uart_putx(reserved_regions[i].start);
-        uart_puts(" - 0x");
-        uart_putx(reserved_regions[i].end);
-        uart_puts("\n");
+        log_info("  [%d] 0x%x - 0x%x\n", i, reserved_regions[i].start,
+                 reserved_regions[i].end);
     }
-    uart_puts("================================\n");
+    log_info("================================\n");
 }
 
 /**
  * Initialize the entire memory subsystem
  */
-void startup_memory_init(void *dtb_base, uint64_t initrd_start, uint64_t initrd_end) {
+void startup_memory_init(void *dtb_base, uint64_t initrd_start,
+                         uint64_t initrd_end) {
     struct mem_region mem;
     struct mem_region reserved[MAX_DTB_MEM_REGIONS];
     int reserved_count;
 
     /* 1. Get memory region from DTB */
     if (fdt_get_memory_region(dtb_base, &mem) < 0) {
-        uart_puts("[!] Failed to get memory region from DTB, using default\n");
+        log_info("[!] Failed to get memory region from DTB, using default\n");
         mem.start = 0x80000000UL;
         mem.size = 0x80000000UL; /* 2GB default */
     }
 
-    printf("Memory region: 0x%x - 0x%x (%d MB)\n",
-           mem.start, mem.start + mem.size, mem.size / (1024 * 1024));
+    log_info("Memory region: 0x%x - 0x%x (%d MB)\n", mem.start,
+             mem.start + mem.size, (int)(mem.size / (1024 * 1024)));
 
     /* 2. Mark reserved regions BEFORE initializing startup allocator */
 
     /* Reserve DTB blob */
     uint64_t dtb_start = (uint64_t)dtb_base;
     uint64_t dtb_size = fdt_totalsize(dtb_base);
-    printf("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
+    log_info("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
     startup_add_reserved(dtb_start, dtb_size);
 
     /* Reserve Kernel image */
     uint64_t kernel_start = (uint64_t)_kernel_start;
     uint64_t kernel_end_addr = (uint64_t)_kernel_end;
     uint64_t kernel_size = kernel_end_addr - kernel_start;
-    printf("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end_addr);
+    log_info("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end_addr);
     startup_add_reserved(kernel_start, kernel_size);
 
     /* Reserve bootloader relocation area */
     uint64_t reloc_size = (uint64_t)_load_end - (uint64_t)_load_start;
-    printf("Reserving RELOC area: 0x%x - 0x%x\n",
-           (uint64_t)RELOC_ADDR, (uint64_t)RELOC_ADDR + reloc_size);
+    log_info("Reserving RELOC area: 0x%x - 0x%x\n", (uint64_t)RELOC_ADDR,
+             (uint64_t)RELOC_ADDR + reloc_size);
     startup_add_reserved(RELOC_ADDR, reloc_size);
 
     /* Reserve Initramfs (if present) */
     if (initrd_start && initrd_end && initrd_end > initrd_start) {
-        printf("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start, initrd_end);
+        log_info("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start,
+                 initrd_end);
         startup_add_reserved(initrd_start, initrd_end - initrd_start);
     }
 
     /* Parse and reserve /reserved-memory regions from DTB */
-    reserved_count = fdt_get_reserved_memory(dtb_base, reserved, MAX_DTB_MEM_REGIONS);
+    reserved_count =
+        fdt_get_reserved_memory(dtb_base, reserved, MAX_DTB_MEM_REGIONS);
     if (reserved_count > 0) {
-        uart_puts("Parsing /reserved-memory...\n");
+        log_info("Parsing /reserved-memory...\n");
         for (int i = 0; i < reserved_count; i++) {
             startup_add_reserved(reserved[i].start, reserved[i].size);
         }
     } else {
-        uart_puts("No /reserved-memory node found\n");
+        log_info("No /reserved-memory node found\n");
     }
 
     /* 3. Initialize startup allocator */
@@ -300,28 +276,31 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start, uint64_t initrd_
     frame_array_size = (frame_array_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint64_t array_pages = frame_array_size / PAGE_SIZE;
 
-    printf("Frame array: %d pages (%d KB) for %d total pages\n",
-           array_pages, frame_array_size / 1024, total_pages);
+    log_info("Frame array: %d pages (%d KB) for %d total pages\n",
+             (int)array_pages, (int)(frame_array_size / 1024),
+             (int)total_pages);
 
-    struct frame *frame_array = (struct frame *)startup_alloc(frame_array_size, PAGE_SIZE);
+    struct frame *frame_array =
+        (struct frame *)startup_alloc(frame_array_size, PAGE_SIZE);
     if (!frame_array) {
-        uart_puts("[!] Failed to allocate frame array!\n");
+        log_info("[!] Failed to allocate frame array!\n");
         return;
     }
 
     /* Also mark the frame array itself as reserved */
     startup_add_reserved((uint64_t)frame_array, frame_array_size);
 
-    /* 5. Get the current bump pointer position - everything up to here is reserved */
+    /* 5. Get the current bump pointer position - everything up to here is
+     * reserved */
     uint64_t reserved_end = startup_get_current();
 
     /* 6. Initialize buddy system with the dynamically allocated frame array */
-    buddy_init_with_frame_array(mem.start, mem.size, frame_array,
-                                 array_pages, reserved_end);
+    buddy_init_with_frame_array(mem.start, mem.size, frame_array, array_pages,
+                                reserved_end);
 
     /* 7. Initialize dynamic allocator */
     kmalloc_init();
 
-    uart_puts("Memory initialization complete.\n");
+    log_info("Memory initialization complete.\n");
     buddy_dump();
 }
