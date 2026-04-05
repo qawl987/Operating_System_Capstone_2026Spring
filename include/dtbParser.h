@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+/* Maximum number of memory regions from DTB */
+#define MAX_DTB_MEM_REGIONS 16
+
 struct fdt_header {
     uint32_t magic;
     uint32_t totalsize;
@@ -14,6 +17,16 @@ struct fdt_header {
     uint32_t boot_cpuid_phys;
     uint32_t size_dt_strings;
     uint32_t size_dt_struct;
+};
+
+/**
+ * struct mem_region - Describes a memory region
+ * @start: Start physical address
+ * @size:  Size in bytes
+ */
+struct mem_region {
+    uint64_t start;
+    uint64_t size;
 };
 
 int fdt_path_offset(const void *fdt, const char *target_path);
@@ -34,5 +47,25 @@ static inline uint32_t fdt_totalsize(const void *fdt) {
            ((header->totalsize << 8) & 0xFF0000) |
            ((header->totalsize << 24) & 0xFF000000);
 }
+
+/**
+ * fdt_get_memory_region - Get main memory region from /memory node
+ * @fdt: pointer to the device tree blob
+ * @region: output parameter for the memory region
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+int fdt_get_memory_region(const void *fdt, struct mem_region *region);
+
+/**
+ * fdt_get_reserved_memory - Get reserved memory regions from /reserved-memory
+ * @fdt: pointer to the device tree blob
+ * @regions: output array for reserved regions
+ * @max_regions: maximum number of regions to return
+ *
+ * Returns the number of regions found.
+ */
+int fdt_get_reserved_memory(const void *fdt, struct mem_region *regions,
+                            int max_regions);
 
 #endif /* DTBPARSER_H */

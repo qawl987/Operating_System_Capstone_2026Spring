@@ -13,145 +13,6 @@
 static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
 
-/**
- * Parse /reserved-memory node and add regions to startup allocator
- */
-static void parse_reserved_memory_startup(void *dtb_base) {
-    int parent_offset = fdt_path_offset(dtb_base, "/reserved-memory");
-    if (parent_offset < 0) {
-        uart_puts("No /reserved-memory node found\n");
-        return;
-    }
-
-    uart_puts("Parsing /reserved-memory...\n");
-
-    /* Iterate through child nodes */
-    int child_offset = fdt_first_subnode(dtb_base, parent_offset);
-    while (child_offset >= 0) {
-        int len;
-        const void *reg = fdt_getprop(dtb_base, child_offset, "reg", &len);
-        if (reg && len >= 16) {
-            const uint32_t *cells = (const uint32_t *)reg;
-            /* reg = <addr_hi addr_lo size_hi size_lo> */
-            unsigned long addr =
-                ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
-            unsigned long size =
-                ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
-
-            startup_add_reserved(addr, size);
-        }
-
-        child_offset = fdt_next_subnode(dtb_base, child_offset);
-    }
-}
-
-/**
- * Initialize memory using startup allocator
- * 1. Mark all reserved regions (DTB, kernel, initramfs, /reserved-memory)
- * 2. Initialize startup allocator
- * 3. Allocate frame array from startup allocator
- * 4. Initialize buddy system with dynamically allocated frame array
- * 5. Initialize kmalloc
- */
-static void memory_init_with_startup_alloc(void *dtb_base,
-                                           unsigned long initrd_start,
-                                           unsigned long initrd_end) {
-    int offset, len;
-    const void *prop;
-    unsigned long mem_start = 0;
-    unsigned long mem_size = 0;
-
-    /* 1. Get memory region from DTB /memory node */
-    offset = fdt_path_offset(dtb_base, "/memory");
-    if (offset >= 0) {
-        prop = fdt_getprop(dtb_base, offset, "reg", &len);
-        if (prop && len >= 16) {
-            const uint32_t *cells = (const uint32_t *)prop;
-            /* reg = <addr_hi addr_lo size_hi size_lo> */
-            mem_start = ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
-            mem_size = ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
-        }
-    }
-
-    if (mem_start == 0 || mem_size == 0) {
-        uart_puts("[!] Failed to get memory region from DTB, using default\n");
-        mem_start = 0x80000000UL;
-        mem_size = 0x80000000UL; /* 2GB default */
-    }
-
-    printf("Memory region: 0x%x - 0x%x (%d MB)\n", mem_start,
-           mem_start + mem_size, mem_size / (1024 * 1024));
-
-    /* 2. Mark reserved regions BEFORE initializing startup allocator */
-
-    /* Reserve DTB blob */
-    unsigned long dtb_start = (unsigned long)dtb_base;
-    unsigned long dtb_size = fdt_totalsize(dtb_base);
-    printf("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
-    startup_add_reserved(dtb_start, dtb_size);
-
-    /* Reserve Kernel image */
-    unsigned long kernel_start = (unsigned long)_kernel_start;
-    unsigned long kernel_end = (unsigned long)_kernel_end;
-    unsigned long kernel_size = kernel_end - kernel_start;
-    printf("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end);
-    startup_add_reserved(kernel_start, kernel_size);
-
-    /* Reserve bootloader relocation area */
-    unsigned long reloc_size = (unsigned long)_load_end - (unsigned long)_load_start;
-    printf("Reserving RELOC area: 0x%x - 0x%x\n", 
-           (unsigned long)RELOC_ADDR, (unsigned long)RELOC_ADDR + reloc_size);
-    startup_add_reserved(RELOC_ADDR, reloc_size);
-
-    /* Reserve Initramfs (if present) */
-    if (initrd_start && initrd_end && initrd_end > initrd_start) {
-        printf("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start, initrd_end);
-        startup_add_reserved(initrd_start, initrd_end - initrd_start);
-    }
-
-    /* Parse and reserve /reserved-memory regions */
-    parse_reserved_memory_startup(dtb_base);
-
-    /* 3. Initialize startup allocator */
-    startup_init(mem_start, mem_size);
-    startup_dump();
-
-    /* 4. Calculate frame array size and allocate it */
-    unsigned long total_pages = mem_size / PAGE_SIZE;
-    unsigned long frame_array_size = get_frame_array_size(total_pages);
-    /* Round up to page size */
-    frame_array_size = (frame_array_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    unsigned long array_pages = frame_array_size / PAGE_SIZE;
-
-    printf("Frame array: %d pages (%d KB) for %d total pages\n", array_pages,
-           frame_array_size / 1024, total_pages);
-
-    struct frame *frame_array =
-        (struct frame *)startup_alloc(frame_array_size, PAGE_SIZE);
-    if (!frame_array) {
-        uart_puts("[!] Failed to allocate frame array!\n");
-        return;
-    }
-
-    /* Also mark the frame array itself as reserved in startup allocator's
-     * tracking */
-    startup_add_reserved((unsigned long)frame_array, frame_array_size);
-
-    /* 5. Get the current bump pointer position - everything up to here is
-     * reserved */
-    unsigned long reserved_end = startup_get_current();
-
-    /* 6. Initialize buddy system with the dynamically allocated frame array */
-    buddy_init_with_frame_array(mem_start, mem_size, frame_array, array_pages,
-                                reserved_end);
-
-    /* 7. Initialize dynamic allocator */
-    kmalloc_init();
-
-    uart_puts("Memory initialization complete (startup allocator).\n");
-    buddy_dump();
-}
-
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
@@ -163,9 +24,6 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
         int len;
         const void *reg = fdt_getprop(dtb_base, offset, "reg", &len);
         if (reg && len >= 8) {
-            // reg format depends on #address-cells (typically 2 for 64-bit)
-            // Each cell is 32-bit big-endian: [addr_hi, addr_lo, size_hi,
-            // size_lo]
             const uint32_t *cells = (const uint32_t *)reg;
             uint64_t uart_addr =
                 ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
@@ -209,7 +67,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     uart_puts("========================================\n\n");
 
     /* Initialize memory system using startup allocator */
-    memory_init_with_startup_alloc(dtb_base, g_initrd_start, g_initrd_end);
+    startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
+
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
     int cmd_idx = 0;

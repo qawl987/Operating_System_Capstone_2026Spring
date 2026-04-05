@@ -74,8 +74,7 @@ uint64_t startup_get_mem_start(void);
 uint64_t startup_get_mem_end(void);
 
 /**
- * startup_is_reserved - Check if an address range overlaps with reserved
- * regions
+ * startup_is_reserved - Check if an address range overlaps with reserved regions
  * @start: Start address to check
  * @end:   End address to check (exclusive)
  *
@@ -87,5 +86,21 @@ int startup_is_reserved(uint64_t start, uint64_t end);
  * startup_dump - Print startup allocator status for debugging
  */
 void startup_dump(void);
+
+/**
+ * startup_memory_init - Initialize the entire memory subsystem
+ * @dtb_base:     Pointer to the device tree blob
+ * @initrd_start: Start address of initramfs (0 if none)
+ * @initrd_end:   End address of initramfs (0 if none)
+ *
+ * This is the main entry point for memory initialization.
+ * It handles:
+ * 1. Parsing DTB for memory regions
+ * 2. Marking all reserved regions
+ * 3. Allocating the frame array
+ * 4. Initializing buddy system
+ * 5. Initializing kmalloc
+ */
+void startup_memory_init(void *dtb_base, uint64_t initrd_start, uint64_t initrd_end);
 
 #endif /* _STARTUP_ALLOC_H */

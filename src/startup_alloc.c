@@ -4,6 +4,11 @@
  */
 
 #include "startup_alloc.h"
+#include "buddy.h"
+#include "config.h"
+#include "dtbParser.h"
+#include "helper.h"
+#include "kmalloc.h"
 #include "uart.h"
 
 /* Reserved regions array */
@@ -16,11 +21,6 @@ static uint64_t mem_region_end = 0;
 
 /* Current bump pointer position */
 static uint64_t bump_ptr = 0;
-
-/* Helper: align up to given alignment */
-static inline uint64_t align_up(uint64_t val, uint64_t align) {
-    return (val + align - 1) & ~(align - 1);
-}
 
 /**
  * Check if two ranges overlap
@@ -123,7 +123,7 @@ void startup_init(uint64_t mem_start, uint64_t mem_size) {
 
     /* Find first usable address (4KB aligned) */
     uint64_t first_usable = find_first_usable(mem_start, mem_region_end);
-    bump_ptr = align_up(first_usable, 4096);
+    bump_ptr = align_up_val(first_usable, 4096);
 
     uart_puts("[Startup] Initialized: memory 0x");
     uart_putx(mem_region_start);
@@ -149,7 +149,7 @@ void *startup_alloc(uint64_t size, uint64_t align) {
     }
 
     /* Align the bump pointer */
-    uint64_t aligned_ptr = align_up(bump_ptr, align);
+    uint64_t aligned_ptr = align_up_val(bump_ptr, align);
 
     /* Skip over any reserved regions */
     int progress = 1;
@@ -162,7 +162,7 @@ void *startup_alloc(uint64_t size, uint64_t align) {
                                reserved_regions[i].start,
                                reserved_regions[i].end)) {
                 /* Move past this reserved region */
-                aligned_ptr = align_up(reserved_regions[i].end, align);
+                aligned_ptr = align_up_val(reserved_regions[i].end, align);
                 progress = 1;
             }
         }
@@ -231,4 +231,97 @@ void startup_dump(void) {
         uart_puts("\n");
     }
     uart_puts("================================\n");
+}
+
+/**
+ * Initialize the entire memory subsystem
+ */
+void startup_memory_init(void *dtb_base, uint64_t initrd_start, uint64_t initrd_end) {
+    struct mem_region mem;
+    struct mem_region reserved[MAX_DTB_MEM_REGIONS];
+    int reserved_count;
+
+    /* 1. Get memory region from DTB */
+    if (fdt_get_memory_region(dtb_base, &mem) < 0) {
+        uart_puts("[!] Failed to get memory region from DTB, using default\n");
+        mem.start = 0x80000000UL;
+        mem.size = 0x80000000UL; /* 2GB default */
+    }
+
+    printf("Memory region: 0x%x - 0x%x (%d MB)\n",
+           mem.start, mem.start + mem.size, mem.size / (1024 * 1024));
+
+    /* 2. Mark reserved regions BEFORE initializing startup allocator */
+
+    /* Reserve DTB blob */
+    uint64_t dtb_start = (uint64_t)dtb_base;
+    uint64_t dtb_size = fdt_totalsize(dtb_base);
+    printf("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
+    startup_add_reserved(dtb_start, dtb_size);
+
+    /* Reserve Kernel image */
+    uint64_t kernel_start = (uint64_t)_kernel_start;
+    uint64_t kernel_end_addr = (uint64_t)_kernel_end;
+    uint64_t kernel_size = kernel_end_addr - kernel_start;
+    printf("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end_addr);
+    startup_add_reserved(kernel_start, kernel_size);
+
+    /* Reserve bootloader relocation area */
+    uint64_t reloc_size = (uint64_t)_load_end - (uint64_t)_load_start;
+    printf("Reserving RELOC area: 0x%x - 0x%x\n",
+           (uint64_t)RELOC_ADDR, (uint64_t)RELOC_ADDR + reloc_size);
+    startup_add_reserved(RELOC_ADDR, reloc_size);
+
+    /* Reserve Initramfs (if present) */
+    if (initrd_start && initrd_end && initrd_end > initrd_start) {
+        printf("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start, initrd_end);
+        startup_add_reserved(initrd_start, initrd_end - initrd_start);
+    }
+
+    /* Parse and reserve /reserved-memory regions from DTB */
+    reserved_count = fdt_get_reserved_memory(dtb_base, reserved, MAX_DTB_MEM_REGIONS);
+    if (reserved_count > 0) {
+        uart_puts("Parsing /reserved-memory...\n");
+        for (int i = 0; i < reserved_count; i++) {
+            startup_add_reserved(reserved[i].start, reserved[i].size);
+        }
+    } else {
+        uart_puts("No /reserved-memory node found\n");
+    }
+
+    /* 3. Initialize startup allocator */
+    startup_init(mem.start, mem.size);
+    startup_dump();
+
+    /* 4. Calculate frame array size and allocate it */
+    uint64_t total_pages = mem.size / PAGE_SIZE;
+    uint64_t frame_array_size = get_frame_array_size(total_pages);
+    /* Round up to page size */
+    frame_array_size = (frame_array_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uint64_t array_pages = frame_array_size / PAGE_SIZE;
+
+    printf("Frame array: %d pages (%d KB) for %d total pages\n",
+           array_pages, frame_array_size / 1024, total_pages);
+
+    struct frame *frame_array = (struct frame *)startup_alloc(frame_array_size, PAGE_SIZE);
+    if (!frame_array) {
+        uart_puts("[!] Failed to allocate frame array!\n");
+        return;
+    }
+
+    /* Also mark the frame array itself as reserved */
+    startup_add_reserved((uint64_t)frame_array, frame_array_size);
+
+    /* 5. Get the current bump pointer position - everything up to here is reserved */
+    uint64_t reserved_end = startup_get_current();
+
+    /* 6. Initialize buddy system with the dynamically allocated frame array */
+    buddy_init_with_frame_array(mem.start, mem.size, frame_array,
+                                 array_pages, reserved_end);
+
+    /* 7. Initialize dynamic allocator */
+    kmalloc_init();
+
+    uart_puts("Memory initialization complete.\n");
+    buddy_dump();
 }

@@ -1,3 +1,4 @@
+#include "dtbParser.h"
 #include "helper.h"
 
 #define FDT_BEGIN_NODE 0x00000001
@@ -5,19 +6,6 @@
 #define FDT_PROP 0x00000003
 #define FDT_NOP 0x00000004
 #define FDT_END 0x00000009
-
-struct fdt_header {
-    uint32_t magic;
-    uint32_t totalsize;
-    uint32_t off_dt_struct;
-    uint32_t off_dt_strings;
-    uint32_t off_mem_rsvmap;
-    uint32_t version;
-    uint32_t last_comp_version;
-    uint32_t boot_cpuid_phys;
-    uint32_t size_dt_strings;
-    uint32_t size_dt_struct;
-};
 
 struct path {
     char path[256];
@@ -254,4 +242,53 @@ int fdt_next_subnode(const void *fdt, int nodeoffset) {
             return -1;
         }
     }
+}
+
+/**
+ * fdt_get_memory_region - Get main memory region from /memory node
+ */
+int fdt_get_memory_region(const void *fdt, struct mem_region *region) {
+    int offset = fdt_path_offset(fdt, "/memory");
+    if (offset < 0) {
+        return -1;
+    }
+
+    int len;
+    const void *prop = fdt_getprop(fdt, offset, "reg", &len);
+    if (!prop || len < 16) {
+        return -1;
+    }
+
+    const uint32_t *cells = (const uint32_t *)prop;
+    region->start = ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
+    region->size = ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
+
+    return 0;
+}
+
+/**
+ * fdt_get_reserved_memory - Get reserved memory regions from /reserved-memory
+ */
+int fdt_get_reserved_memory(const void *fdt, struct mem_region *regions, int max_regions) {
+    int parent_offset = fdt_path_offset(fdt, "/reserved-memory");
+    if (parent_offset < 0) {
+        return 0;
+    }
+
+    int count = 0;
+    int child_offset = fdt_first_subnode(fdt, parent_offset);
+    
+    while (child_offset >= 0 && count < max_regions) {
+        int len;
+        const void *reg = fdt_getprop(fdt, child_offset, "reg", &len);
+        if (reg && len >= 16) {
+            const uint32_t *cells = (const uint32_t *)reg;
+            regions[count].start = ((uint64_t)bswap32(cells[0]) << 32) | bswap32(cells[1]);
+            regions[count].size = ((uint64_t)bswap32(cells[2]) << 32) | bswap32(cells[3]);
+            count++;
+        }
+        child_offset = fdt_next_subnode(fdt, child_offset);
+    }
+
+    return count;
 }
