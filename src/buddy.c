@@ -428,16 +428,12 @@ void buddy_dump(void) {
 
 /* ========== Test Code ========== */
 
-/* Default test memory region */
-#define TEST_MEM_BASE 0x90000000UL
-#define TEST_MEM_SIZE 0x10000000UL /* 256 MB */
-
 void buddy_test(void) {
     int p1, p2, p3;
 
     printf("\n===== Buddy System Test =====\n");
 
-    /* Initialize with hardcoded region */
+    /* Initialize with platform-specific test region */
     buddy_init(TEST_MEM_BASE, TEST_MEM_SIZE);
     buddy_dump();
 

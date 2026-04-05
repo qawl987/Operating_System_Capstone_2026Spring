@@ -218,8 +218,8 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     /* 1. Get memory region from DTB */
     if (fdt_get_memory_region(dtb_base, &mem) < 0) {
         log_info("[!] Failed to get memory region from DTB, using default\n");
-        mem.start = 0x80000000UL;
-        mem.size = 0x80000000UL; /* 2GB default */
+        mem.start = DEFAULT_MEM_BASE;
+        mem.size = DEFAULT_MEM_SIZE;
     }
 
     log_info("Memory region: 0x%x - 0x%x (%d MB)\n", mem.start,

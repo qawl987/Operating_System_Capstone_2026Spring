@@ -15,10 +15,22 @@
 /* QEMU virt machine addresses */
 #define LOAD_ADDR 0x80200000ULL
 #define RELOC_ADDR 0x84000000ULL
+/* Default memory region for QEMU (from DTB, fallback values) */
+#define DEFAULT_MEM_BASE 0x80000000UL
+#define DEFAULT_MEM_SIZE 0x80000000UL /* 2GB */
+/* Test memory region (safe area not overlapping with kernel/DTB) */
+#define TEST_MEM_BASE 0x90000000UL
+#define TEST_MEM_SIZE 0x10000000UL /* 256MB */
 #else
 /* Orange Pi RV2 addresses */
 #define LOAD_ADDR 0x00200000ULL
 #define RELOC_ADDR 0x20000000ULL
+/* Default memory region for OrangePi RV2 (from DTB, fallback values) */
+#define DEFAULT_MEM_BASE 0x00000000UL
+#define DEFAULT_MEM_SIZE 0x80000000UL /* 2GB (first memory region) */
+/* Test memory region (safe area not overlapping with kernel/DTB) */
+#define TEST_MEM_BASE 0x40000000UL
+#define TEST_MEM_SIZE 0x10000000UL /* 256MB */
 #endif
 
 /* Common definitions */
