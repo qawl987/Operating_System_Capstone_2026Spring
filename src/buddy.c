@@ -164,6 +164,20 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
 }
 
 /**
+ * Print current free list block counts at each order level
+ */
+static void print_free_list_status(void) {
+    log_spec("[Free] ");
+    for (int i = MAX_ORDER; i >= 0; i--) {
+        int count = 0;
+        struct list_head *pos;
+        list_for_each(pos, &free_area[i]) { count++; }
+        log_spec("O%d:%d ", i, count);
+    }
+    log_spec("\n");
+}
+
+/**
  * Allocate 2^order contiguous pages
  * Returns page index or -1 on failure
  */
@@ -218,6 +232,7 @@ int alloc_pages(unsigned int order) {
 
     log_spec("[Page] Allocate 0x%x at order %d, page %d\n", page_to_addr(idx),
              order, idx);
+    print_free_list_status();
 
     return idx;
 }
@@ -285,6 +300,7 @@ void free_pages(int page_idx) {
              page_to_addr(page_idx), current_order, cur_idx);
     log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", cur_idx,
              current_order, cur_idx, cur_idx + (1 << current_order) - 1);
+    print_free_list_status();
 }
 
 /**
