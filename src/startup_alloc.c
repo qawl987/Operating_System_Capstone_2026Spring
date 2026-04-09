@@ -74,6 +74,16 @@ void startup_add_reserved(uint64_t start, uint64_t size) {
 }
 
 /**
+ * Get reserved region table
+ */
+const struct reserved_region *startup_get_reserved_regions(int *count) {
+    if (count) {
+        *count = num_reserved;
+    }
+    return reserved_regions;
+}
+
+/**
  * Check if an address range overlaps with any reserved region
  */
 int startup_is_reserved(uint64_t start, uint64_t end) {
@@ -290,15 +300,10 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     /* Also mark the frame array itself as reserved */
     startup_add_reserved((uint64_t)frame_array, frame_array_size);
 
-    /* 5. Get the current bump pointer position - everything up to here is
-     * reserved */
-    uint64_t reserved_end = startup_get_current();
+    /* 5. Initialize buddy system with hole-punching reserved regions */
+    buddy_init_with_frame_array(mem.start, mem.size, frame_array, array_pages);
 
-    /* 6. Initialize buddy system with the dynamically allocated frame array */
-    buddy_init_with_frame_array(mem.start, mem.size, frame_array, array_pages,
-                                reserved_end);
-
-    /* 7. Initialize dynamic allocator */
+    /* 6. Initialize dynamic allocator */
     kmalloc_init();
 
     log_info("Memory initialization complete.\n");

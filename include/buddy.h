@@ -76,15 +76,13 @@ void memory_reserve(unsigned long start, unsigned long size);
  * @size:        Size of managed memory in bytes
  * @frame_array: Pointer to pre-allocated frame array
  * @array_pages: Number of pages used by the frame array (to mark as reserved)
- * @reserved_end: End of the startup allocator's reserved region
  *
  * This function is used with the startup allocator to dynamically allocate
  * the frame array before initializing the buddy system.
  */
 void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
                                  struct frame *frame_array,
-                                 unsigned long array_pages,
-                                 unsigned long reserved_end);
+                                 unsigned long array_pages);
 
 /**
  * get_frame_array_size - Calculate the size needed for the frame array
