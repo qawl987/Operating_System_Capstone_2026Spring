@@ -8,6 +8,7 @@
 #include "buddy.h"
 #include "config.h"
 #include "logger.h"
+#include "startup_alloc.h"
 #include "uart.h"
 
 /* Maximum supported memory size (2 GB for full QEMU virt memory) */
@@ -94,10 +95,11 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
  */
 void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
                                  struct frame *frame_array,
-                                 unsigned long array_pages,
-                                 unsigned long reserved_end) {
+                                 unsigned long array_pages) {
     unsigned long i;
     unsigned long init_num_pages = size / PAGE_SIZE;
+    const struct reserved_region *reserved;
+    int reserved_count;
 
     /* Limit to maximum supported pages */
     if (init_num_pages > MAX_NUM_PAGES) {
@@ -126,41 +128,24 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
         INIT_LIST_HEAD(&mem_map[i].list);
     }
 
-    /*
-     * Calculate which pages are used by the frame array and
-     * mark pages before reserved_end as allocated (these include
-     * kernel, DTB, initramfs, frame array itself, etc.)
-     */
-    unsigned long reserved_pages = 0;
-    if (reserved_end > base_addr) {
-        reserved_pages = (reserved_end - base_addr + PAGE_SIZE - 1) / PAGE_SIZE;
-    }
-
-    log_info("[Buddy] Marking first %d pages as reserved (up to 0x%x)\n",
-             (int)reserved_pages, reserved_end);
-
-    /* Mark reserved pages as allocated */
-    for (i = 0; i < reserved_pages && i < num_pages; i++) {
-        mem_map[i].order = FRAME_ALLOCATED;
-        mem_map[i].refcount = 1;
-    }
-
-    /* Add remaining max-order blocks to the free list */
-    /* Start from the first max-order aligned page after reserved region */
-    unsigned long first_free =
-        ((reserved_pages + (1 << MAX_ORDER) - 1) / (1 << MAX_ORDER)) *
-        (1 << MAX_ORDER);
-
-    for (i = first_free; i < num_pages; i += (1 << MAX_ORDER)) {
+    /* Start with all memory free: add max-order blocks to free lists */
+    for (i = 0; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
         log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,
                  MAX_ORDER, (int)i, (int)(i + (1 << MAX_ORDER) - 1));
     }
 
-    log_info("Buddy system initialized with dynamic array: %d total pages, %d "
-             "free, base=0x%x\n",
-             (int)num_pages, (int)(num_pages - reserved_pages), base_addr);
+    /* Hole-punch reserved regions from free lists */
+    reserved = startup_get_reserved_regions(&reserved_count);
+    for (int r = 0; r < reserved_count; r++) {
+        memory_reserve((unsigned long)reserved[r].start,
+                       (unsigned long)(reserved[r].end - reserved[r].start));
+    }
+
+    log_info("Buddy system initialized with dynamic array: %d total pages, "
+             "base=0x%x (hole-punched %d reserved regions)\n",
+             (int)num_pages, base_addr, reserved_count);
 }
 
 /**
@@ -335,7 +320,7 @@ int get_page_chunk_size(int page_idx) {
 }
 
 /**
- * Deprecated Now! Use startup allocator instead. Reserve a memory region by
+ * Reserve a memory region by
  * removing pages from free lists Algorithm: iterate from MAX_ORDER down to 0,
  * split blocks that overlap with reserved region until all overlapping pages
  * are removed.

@@ -36,6 +36,14 @@ struct reserved_region {
 void startup_add_reserved(uint64_t start, uint64_t size);
 
 /**
+ * startup_get_reserved_regions - Get reserved region table
+ * @count: Output number of reserved regions
+ *
+ * Returns pointer to internal reserved region array.
+ */
+const struct reserved_region *startup_get_reserved_regions(int *count);
+
+/**
  * startup_init - Initialize the startup allocator
  * @mem_start: Start of available physical memory
  * @mem_size:  Size of available memory in bytes
