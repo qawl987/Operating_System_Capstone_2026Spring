@@ -14,6 +14,36 @@
 static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
 
+struct timeout_msg {
+    uint64_t command_time;
+    int sec;
+    char msg[96];
+};
+
+static int parse_dec(const char *s, int *value) {
+    int v = 0;
+    int i = 0;
+    if (s == (void *)0 || value == (void *)0 || s[0] == '\0') {
+        return -1;
+    }
+    while (s[i] != '\0') {
+        if (s[i] < '0' || s[i] > '9') {
+            return -1;
+        }
+        v = v * 10 + (s[i] - '0');
+        i++;
+    }
+    *value = v;
+    return 0;
+}
+
+static void timeout_cb(void *arg) {
+    struct timeout_msg *t = (struct timeout_msg *)arg;
+    printf("[setTimeout] now=%d cmd=%d +%d \"%s\"\r\n",
+           (int)trap_uptime_seconds(), (int)t->command_time, t->sec, t->msg);
+    free(t);
+}
+
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
@@ -113,6 +143,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                        "  load       - load kernel via UART.\r\n"
                        "  alloc_test - run spec test case (test_alloc_1).\r\n"
                        "  exec [file]- run user program in initrd.\r\n"
+                       "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
                        "  ls         - list files in initrd.\r\n"
                        "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -130,6 +161,47 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "alloc_test") == 0) {
                 alloc_test();
+            } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
+                const char *p = cmd_buf + 11;
+                int i = 0;
+                while (p[i] != '\0' && p[i] != ' ') {
+                    i++;
+                }
+                if (i == 0 || p[i] == '\0') {
+                    printf("Usage: setTimeout <sec> <msg>\r\n");
+                } else {
+                    char sec_buf[12];
+                    if (i >= (int)sizeof(sec_buf)) {
+                        printf("setTimeout: invalid sec\r\n");
+                        continue;
+                    }
+                    strncpy(sec_buf, p, (size_t)i);
+                    sec_buf[i] = '\0';
+                    int sec = 0;
+                    if (parse_dec(sec_buf, &sec) < 0) {
+                        printf("setTimeout: invalid sec\r\n");
+                        continue;
+                    }
+                    const char *msg = p + i + 1;
+                    if (*msg == '\0') {
+                        printf("setTimeout: empty message\r\n");
+                        continue;
+                    }
+                    struct timeout_msg *t =
+                        (struct timeout_msg *)allocate(sizeof(struct timeout_msg));
+                    if (t == (void *)0) {
+                        printf("setTimeout: no memory\r\n");
+                        continue;
+                    }
+                    t->command_time = trap_uptime_seconds();
+                    t->sec = sec;
+                    strncpy(t->msg, msg, sizeof(t->msg) - 1);
+                    t->msg[sizeof(t->msg) - 1] = '\0';
+                    if (add_timer(timeout_cb, t, sec) < 0) {
+                        free(t);
+                        printf("setTimeout: queue full\r\n");
+                    }
+                }
             } else if (strcmp(cmd_buf, "exec") == 0 ||
                        strncmp(cmd_buf, "exec ", 5) == 0) {
                 const char *filename = "prog.bin";

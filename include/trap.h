@@ -42,8 +42,12 @@ struct pt_regs {
     unsigned long badvaddr;
 };
 
+typedef void (*timer_callback_t)(void *arg);
+
 void trap_init(uint64_t hart_id);
 int trap_exec_user(const void *entry, size_t size);
 void do_trap(struct pt_regs *regs);
+int add_timer(timer_callback_t callback, void *arg, int sec);
+uint64_t trap_uptime_seconds(void);
 
 #endif /* TRAP_H */

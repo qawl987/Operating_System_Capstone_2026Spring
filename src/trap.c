@@ -9,6 +9,7 @@ extern void ret_from_exception(void);
 
 #define USER_STACK_SIZE 0x1000UL
 #define TIMER_INTERVAL_TICKS 20000000ULL
+#define TIMER_LIST_MAX 32
 #define SCAUSE_INTERRUPT_BIT (1UL << 63)
 #define SCAUSE_SUPERVISOR_TIMER 5UL
 #define SCAUSE_SUPERVISOR_EXTERNAL 9UL
@@ -16,7 +17,19 @@ extern void ret_from_exception(void);
 #define UART_IRQ_ID 10U
 
 static uint64_t boot_hart_id;
-static uint64_t boot_seconds;
+static uint64_t boot_time_base;
+static uint64_t timer_interval_ticks = TIMER_INTERVAL_TICKS;
+
+struct timer_event {
+    uint64_t expires_at;
+    timer_callback_t callback;
+    void *arg;
+    struct timer_event *next;
+};
+
+static struct timer_event timer_pool[TIMER_LIST_MAX];
+static struct timer_event *timer_free_list;
+static struct timer_event *timer_head;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;
@@ -85,16 +98,107 @@ static void plic_complete(uint32_t irq) {
     plic_write(plic_s_claim_addr(boot_hart_id), irq);
 }
 
+static void timer_pool_init(void) {
+    timer_free_list = &timer_pool[0];
+    for (int i = 0; i < TIMER_LIST_MAX - 1; i++) {
+        timer_pool[i].next = &timer_pool[i + 1];
+    }
+    timer_pool[TIMER_LIST_MAX - 1].next = (void *)0;
+    timer_head = (void *)0;
+}
+
+static struct timer_event *timer_alloc_node(void) {
+    struct timer_event *n = timer_free_list;
+    if (n != (void *)0) {
+        timer_free_list = n->next;
+        n->next = (void *)0;
+    }
+    return n;
+}
+
+static void timer_free_node(struct timer_event *n) {
+    n->next = timer_free_list;
+    timer_free_list = n;
+}
+
+static void program_timer_absolute(uint64_t target) {
+    sbi_set_timer(target);
+}
+
 static void program_next_timer(void) {
+    if (timer_head != (void *)0) {
+        program_timer_absolute(timer_head->expires_at);
+        return;
+    }
     uint64_t now = rdtime();
-    sbi_set_timer(now + TIMER_INTERVAL_TICKS);
+    program_timer_absolute(now + timer_interval_ticks);
+}
+
+int add_timer(timer_callback_t callback, void *arg, int sec) {
+    if (callback == (void *)0 || sec < 0) {
+        return -1;
+    }
+
+    struct timer_event *n = timer_alloc_node();
+    if (n == (void *)0) {
+        return -1;
+    }
+
+    uint64_t now = rdtime();
+    uint64_t delay_ticks = (uint64_t)sec * timer_interval_ticks / 2;
+    n->expires_at = now + delay_ticks;
+    n->callback = callback;
+    n->arg = arg;
+
+    if (timer_head == (void *)0 || n->expires_at < timer_head->expires_at) {
+        n->next = timer_head;
+        timer_head = n;
+        program_next_timer();
+        return 0;
+    }
+
+    struct timer_event *cur = timer_head;
+    while (cur->next != (void *)0 && cur->next->expires_at <= n->expires_at) {
+        cur = cur->next;
+    }
+    n->next = cur->next;
+    cur->next = n;
+    return 0;
+}
+
+uint64_t trap_uptime_seconds(void) {
+    uint64_t now = rdtime();
+    if (now < boot_time_base) {
+        return 0;
+    }
+    return (now - boot_time_base) / (timer_interval_ticks / 2);
+}
+
+static void timer_tick_fallback_print(void) {
+    printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
+}
+
+static void handle_timer_events(void) {
+    uint64_t now = rdtime();
+    while (timer_head != (void *)0 && timer_head->expires_at <= now) {
+        struct timer_event *n = timer_head;
+        timer_head = n->next;
+        if (n->callback) {
+            n->callback(n->arg);
+        }
+        timer_free_node(n);
+        now = rdtime();
+    }
 }
 
 static void handle_interrupt(unsigned long cause) {
     unsigned long irq = cause & ~SCAUSE_INTERRUPT_BIT;
     if (irq == SCAUSE_SUPERVISOR_TIMER) {
-        boot_seconds += 2;
-        printf("[Timer] %d seconds after boot\n", (int)boot_seconds);
+        if (timer_head == (void *)0) {
+            timer_tick_fallback_print();
+        } else {
+            handle_timer_events();
+        }
         program_next_timer();
         return;
     }
@@ -132,9 +236,11 @@ void do_trap(struct pt_regs *regs) {
 
 void trap_init(uint64_t hart_id) {
     boot_hart_id = hart_id;
+    boot_time_base = rdtime();
     write_stvec((void *)handle_exception_entry);
     write_sscratch(read_sp());
     plic_init();
+    timer_pool_init();
     uart_enable_rx_interrupt();
     enable_sie_stie();
     enable_sie_seie();
