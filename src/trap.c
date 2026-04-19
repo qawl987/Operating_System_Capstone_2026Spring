@@ -174,8 +174,12 @@ uint64_t trap_uptime_seconds(void) {
     return (now - boot_time_base) / (timer_interval_ticks / 2);
 }
 
-static void timer_tick_fallback_print(void) {
+static void periodic_tick_cb(void *arg) {
+    (void)arg;
     printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
+    if (add_timer(periodic_tick_cb, (void *)0, 2) < 0) {
+        printf("[Timer] failed to schedule periodic tick\n");
+    }
 }
 
 static void handle_timer_events(void) {
@@ -183,10 +187,10 @@ static void handle_timer_events(void) {
     while (timer_head != (void *)0 && timer_head->expires_at <= now) {
         struct timer_event *n = timer_head;
         timer_head = n->next;
+        timer_free_node(n);
         if (n->callback) {
             n->callback(n->arg);
         }
-        timer_free_node(n);
         now = rdtime();
     }
 }
@@ -194,11 +198,7 @@ static void handle_timer_events(void) {
 static void handle_interrupt(unsigned long cause) {
     unsigned long irq = cause & ~SCAUSE_INTERRUPT_BIT;
     if (irq == SCAUSE_SUPERVISOR_TIMER) {
-        if (timer_head == (void *)0) {
-            timer_tick_fallback_print();
-        } else {
-            handle_timer_events();
-        }
+        handle_timer_events();
         program_next_timer();
         return;
     }
@@ -241,6 +241,7 @@ void trap_init(uint64_t hart_id) {
     write_sscratch(read_sp());
     plic_init();
     timer_pool_init();
+    add_timer(periodic_tick_cb, (void *)0, 2);
     uart_enable_rx_interrupt();
     enable_sie_stie();
     enable_sie_seie();
