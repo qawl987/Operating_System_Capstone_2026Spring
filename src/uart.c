@@ -56,20 +56,34 @@ void uart_enable_tx_interrupt(void) { *uart_ier() |= IER_TX_ENABLE; }
 void uart_disable_tx_interrupt(void) { *uart_ier() &= ~IER_TX_ENABLE; }
 
 void uart_handle_irq(void) {
+    /* --- PART 1: RECEIVE LOGIC (RX) --- */
+    // Check if there is data ready in the hardware FIFO/Register
+    // LSR_DR: Line Status Register - Data Ready
     while ((*uart_lsr() & LSR_DR) != 0) {
-        unsigned int n = next_idx(rx_w);
-        char c = (char)*uart_rbr();
+        unsigned int n = next_idx(rx_w); // Calculate next write position
+        char c =
+            (char)*uart_rbr(); // Read byte from hardware (clears RX interrupt)
+
+        // If software ring buffer is NOT full, store the character
         if (n != rx_r) {
-            rx_buf[rx_w] = c;
-            rx_w = n;
+            rx_buf[rx_w] = c; // Put incoming byte in software buffer
+            rx_w = n;         // Update write index
         }
+        // If buffer is full, the character 'c' is unfortunately dropped
     }
 
+    /* --- PART 2: TRANSMIT LOGIC (TX) --- */
+    // Check if the hardware transmitter is empty and ready for more data
+    // LSR_TDRQ: Line Status Register - Transmit Data Request (or Empty)
     if ((*uart_lsr() & LSR_TDRQ) != 0) {
+        // If there is data waiting in our software TX buffer
         if (tx_r != tx_w) {
+            // Move one byte from software buffer to hardware
             *uart_thr() = tx_buf[tx_r];
-            tx_r = next_idx(tx_r);
+            tx_r = next_idx(tx_r); // Update read index
         } else {
+            // Buffer is empty! Disable TX interrupts to stop the hardware
+            // from constantly asking for more data.
             uart_disable_tx_interrupt();
         }
     }
