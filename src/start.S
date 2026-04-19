@@ -40,9 +40,9 @@ bss_done:
     mv   a1, s1
     tail start_kernel
 
-.global handle_exception
+.global handle_exception_entry
 .align 2
-handle_exception:
+handle_exception_entry:
     /*
      * Retrieve kernel sp from sscratch and
      * save interrupted sp to sscratch

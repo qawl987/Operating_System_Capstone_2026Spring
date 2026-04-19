@@ -4,7 +4,7 @@
 #include "trap.h"
 #include "uart.h"
 
-extern void handle_exception(void);
+extern void handle_exception_entry(void);
 extern void ret_from_exception(void);
 
 #define USER_STACK_SIZE 0x1000UL
@@ -110,7 +110,7 @@ static void handle_interrupt(unsigned long cause) {
     }
 }
 
-static void handle_sync_exception(unsigned long cause, struct pt_regs *regs) {
+static void handle_exception(unsigned long cause, struct pt_regs *regs) {
     if (cause == SCAUSE_USER_ECALL) {
         printf("sepc: 0x%x scause: 0x%x stval: 0x%x\n", regs->epc, regs->cause,
                regs->badvaddr);
@@ -126,13 +126,13 @@ void do_trap(struct pt_regs *regs) {
     if (regs->cause & SCAUSE_INTERRUPT_BIT) {
         handle_interrupt(regs->cause);
     } else {
-        handle_sync_exception(regs->cause, regs);
+        handle_exception(regs->cause, regs);
     }
 }
 
 void trap_init(uint64_t hart_id) {
     boot_hart_id = hart_id;
-    write_stvec((void *)handle_exception);
+    write_stvec((void *)handle_exception_entry);
     write_sscratch(read_sp());
     plic_init();
     uart_enable_rx_interrupt();
