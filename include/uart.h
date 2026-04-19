@@ -2,6 +2,10 @@
 #define UART_H
 
 void uart_init(unsigned long base);
+void uart_enable_rx_interrupt(void);
+void uart_enable_tx_interrupt(void);
+void uart_disable_tx_interrupt(void);
+void uart_handle_irq(void);
 char uart_getc(void);
 char uart_getc_raw(void);
 void uart_putc(char c);

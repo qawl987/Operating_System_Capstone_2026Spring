@@ -83,3 +83,36 @@ void initrd_cat(const void *start, const void *end,
     }
     printf("cat: %s: No such file\n", target_filename);
 }
+
+const void *initrd_find_file(const void *start, const void *end,
+                             const char *target_filename, size_t *size) {
+    struct cpio_t *cpio_header = (struct cpio_t *)start;
+
+    while ((void *)cpio_header < end) {
+        if (strncmp(cpio_header->magic, "070701", 6) != 0) {
+            return (void *)0;
+        }
+
+        int name_size = hextoi(cpio_header->namesize, 8);
+        int file_size = hextoi(cpio_header->filesize, 8);
+        char *filename = (char *)cpio_header + 110;
+
+        if (strcmp(filename, "TRAILER!!!") == 0) {
+            break;
+        }
+
+        if (strcmp(filename, target_filename) == 0) {
+            size_t header_plus_name = align_up_val(110 + name_size, 4);
+            if (size) {
+                *size = (size_t)file_size;
+            }
+            return (const void *)((char *)cpio_header + header_plus_name);
+        }
+
+        size_t header_plus_name = align_up_val(110 + name_size, 4);
+        size_t total_offset = header_plus_name + align_up_val(file_size, 4);
+        cpio_header = (struct cpio_t *)((char *)cpio_header + total_offset);
+    }
+
+    return (void *)0;
+}

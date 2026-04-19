@@ -7,6 +7,7 @@
 #include "kmalloc.h"
 #include "sbi.h"
 #include "startup_alloc.h"
+#include "trap.h"
 #include "uart.h"
 
 /* Global state for initrd addresses */
@@ -68,6 +69,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
 
     /* Initialize memory system using startup allocator */
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
+    trap_init(hart_id);
 
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
@@ -110,6 +112,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                        "  meminfo    - show memory status.\r\n"
                        "  load       - load kernel via UART.\r\n"
                        "  alloc_test - run spec test case (test_alloc_1).\r\n"
+                       "  exec [file]- run user program in initrd.\r\n"
                        "  ls         - list files in initrd.\r\n"
                        "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -127,6 +130,25 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "alloc_test") == 0) {
                 alloc_test();
+            } else if (strcmp(cmd_buf, "exec") == 0 ||
+                       strncmp(cmd_buf, "exec ", 5) == 0) {
+                const char *filename = "prog.bin";
+                if (strncmp(cmd_buf, "exec ", 5) == 0 && cmd_buf[5] != '\0') {
+                    filename = cmd_buf + 5;
+                }
+                if (g_initrd_start && g_initrd_end) {
+                    size_t fsize = 0;
+                    const void *entry =
+                        initrd_find_file((void *)g_initrd_start,
+                                         (void *)g_initrd_end, filename, &fsize);
+                    if (!entry) {
+                        printf("exec: %s not found\r\n", filename);
+                    } else if (trap_exec_user(entry, fsize) < 0) {
+                        printf("exec: failed to enter user mode\r\n");
+                    }
+                } else {
+                    printf("No initrd loaded.\r\n");
+                }
             } else if (strcmp(cmd_buf, "ls") == 0) {
                 if (g_initrd_start && g_initrd_end) {
                     initrd_list((void *)g_initrd_start, (void *)g_initrd_end);

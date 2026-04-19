@@ -5,6 +5,8 @@
 #define LSR_DR (1 << 0)
 #define LSR_TDRQ (1 << 6) // TEMT for PXA
 typedef volatile unsigned int uart_reg_t;
+#define IER_RX_ENABLE (1 << 0)
+#define IER_TX_ENABLE (1 << 1)
 #else
 // QEMU virt: 16550 UART, 8-bit registers
 #define UART_BASE 0x10000000UL
@@ -12,9 +14,18 @@ typedef volatile unsigned int uart_reg_t;
 #define LSR_DR (1 << 0)
 #define LSR_TDRQ (1 << 5) // THRE for 16550
 typedef volatile unsigned char uart_reg_t;
+#define IER_RX_ENABLE (1 << 0)
+#define IER_TX_ENABLE (1 << 1)
 #endif
 
 static unsigned long uart_base = UART_BASE;
+#define UART_BUF_SIZE 256
+static char rx_buf[UART_BUF_SIZE];
+static char tx_buf[UART_BUF_SIZE];
+static volatile unsigned int rx_r;
+static volatile unsigned int rx_w;
+static volatile unsigned int tx_r;
+static volatile unsigned int tx_w;
 
 void uart_init(unsigned long base) { uart_base = base; }
 
@@ -30,10 +41,48 @@ static inline uart_reg_t *uart_lsr(void) {
     return (uart_reg_t *)(uart_base + (0x5 << REG_SHIFT));
 }
 
+static inline uart_reg_t *uart_ier(void) {
+    return (uart_reg_t *)(uart_base + (0x1 << REG_SHIFT));
+}
+
+static inline unsigned int next_idx(unsigned int idx) {
+    return (idx + 1U) % UART_BUF_SIZE;
+}
+
+void uart_enable_rx_interrupt(void) { *uart_ier() |= IER_RX_ENABLE; }
+
+void uart_enable_tx_interrupt(void) { *uart_ier() |= IER_TX_ENABLE; }
+
+void uart_disable_tx_interrupt(void) { *uart_ier() &= ~IER_TX_ENABLE; }
+
+void uart_handle_irq(void) {
+    while ((*uart_lsr() & LSR_DR) != 0) {
+        unsigned int n = next_idx(rx_w);
+        char c = (char)*uart_rbr();
+        if (n != rx_r) {
+            rx_buf[rx_w] = c;
+            rx_w = n;
+        }
+    }
+
+    if ((*uart_lsr() & LSR_TDRQ) != 0) {
+        if (tx_r != tx_w) {
+            *uart_thr() = tx_buf[tx_r];
+            tx_r = next_idx(tx_r);
+        } else {
+            uart_disable_tx_interrupt();
+        }
+    }
+}
+
 char uart_getc() {
-    while ((*uart_lsr() & LSR_DR) == 0)
-        ;
-    char c = (char)*uart_rbr();
+    while (rx_r == rx_w) {
+        if ((*uart_lsr() & LSR_DR) != 0) {
+            uart_handle_irq();
+        }
+    }
+    char c = rx_buf[rx_r];
+    rx_r = next_idx(rx_r);
     return c == '\r' ? '\n' : c;
 }
 
@@ -48,9 +97,18 @@ void uart_putc(char c) {
     if (c == '\n')
         uart_putc('\r');
 
-    while ((*uart_lsr() & LSR_TDRQ) == 0)
-        ;
-    *uart_thr() = c;
+    unsigned int n = next_idx(tx_w);
+    while (n == tx_r) {
+        if ((*uart_lsr() & LSR_TDRQ) != 0) {
+            uart_handle_irq();
+        }
+    }
+    tx_buf[tx_w] = c;
+    tx_w = n;
+    uart_enable_tx_interrupt();
+    if ((*uart_lsr() & LSR_TDRQ) != 0) {
+        uart_handle_irq();
+    }
 }
 
 void uart_puts(const char *s) {

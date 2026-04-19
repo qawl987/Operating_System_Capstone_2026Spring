@@ -55,3 +55,11 @@ long sbi_get_impl_version(void) {
     }
     return result.value;
 }
+
+long sbi_set_timer(uint64_t stime_value) {
+    struct sbiret result =
+        sbi_ecall(SBI_EXT_TIME, SBI_EXT_TIME_SET_TIMER,
+                  (unsigned long)stime_value, (unsigned long)(stime_value >> 32),
+                  0, 0, 0, 0);
+    return result.error;
+}

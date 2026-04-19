@@ -9,7 +9,7 @@
  * - LOG_LEVEL_INFO  (2): Spec + initialization info
  * - LOG_LEVEL_DEBUG (3): All logs (default)
  */
-#define LOG_LEVEL 1 /* Set to 1 for demo, 3 for development */
+#define LOG_LEVEL 0 /* Set to 1 for demo, 3 for development */
 
 #ifdef PLATFORM_QEMU
 /* QEMU virt machine addresses */
