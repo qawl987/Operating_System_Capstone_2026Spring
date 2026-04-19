@@ -10,6 +10,7 @@ extern void ret_from_exception(void);
 #define USER_STACK_SIZE 0x1000UL
 #define TIMER_INTERVAL_TICKS 20000000ULL
 #define TIMER_LIST_MAX 32
+#define TASK_LIST_MAX 64
 #define SCAUSE_INTERRUPT_BIT (1UL << 63)
 #define SCAUSE_SUPERVISOR_TIMER 5UL
 #define SCAUSE_SUPERVISOR_EXTERNAL 9UL
@@ -30,6 +31,18 @@ struct timer_event {
 static struct timer_event timer_pool[TIMER_LIST_MAX];
 static struct timer_event *timer_free_list;
 static struct timer_event *timer_head;
+
+struct task_event {
+    int priority;
+    task_callback_t callback;
+    void *arg;
+    struct task_event *next;
+};
+
+static struct task_event task_pool[TASK_LIST_MAX];
+static struct task_event *task_free_list;
+static struct task_event *task_head;
+static int task_current_priority = -2147483647;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;
@@ -107,6 +120,15 @@ static void timer_pool_init(void) {
     timer_head = (void *)0;
 }
 
+static void task_pool_init(void) {
+    task_free_list = &task_pool[0];
+    for (int i = 0; i < TASK_LIST_MAX - 1; i++) {
+        task_pool[i].next = &task_pool[i + 1];
+    }
+    task_pool[TASK_LIST_MAX - 1].next = (void *)0;
+    task_head = (void *)0;
+}
+
 static struct timer_event *timer_alloc_node(void) {
     struct timer_event *n = timer_free_list;
     if (n != (void *)0) {
@@ -119,6 +141,20 @@ static struct timer_event *timer_alloc_node(void) {
 static void timer_free_node(struct timer_event *n) {
     n->next = timer_free_list;
     timer_free_list = n;
+}
+
+static struct task_event *task_alloc_node(void) {
+    struct task_event *n = task_free_list;
+    if (n != (void *)0) {
+        task_free_list = n->next;
+        n->next = (void *)0;
+    }
+    return n;
+}
+
+static void task_free_node(struct task_event *n) {
+    n->next = task_free_list;
+    task_free_list = n;
 }
 
 static void program_timer_absolute(uint64_t target) {
@@ -166,6 +202,34 @@ int add_timer(timer_callback_t callback, void *arg, int sec) {
     return 0;
 }
 
+int add_task(task_callback_t callback, void *arg, int priority) {
+    if (callback == (void *)0) {
+        return -1;
+    }
+
+    struct task_event *n = task_alloc_node();
+    if (n == (void *)0) {
+        return -1;
+    }
+    n->priority = priority;
+    n->callback = callback;
+    n->arg = arg;
+
+    if (task_head == (void *)0 || priority > task_head->priority) {
+        n->next = task_head;
+        task_head = n;
+        return 0;
+    }
+
+    struct task_event *cur = task_head;
+    while (cur->next != (void *)0 && cur->next->priority >= priority) {
+        cur = cur->next;
+    }
+    n->next = cur->next;
+    cur->next = n;
+    return 0;
+}
+
 uint64_t trap_uptime_seconds(void) {
     uint64_t now = rdtime();
     if (now < boot_time_base) {
@@ -187,11 +251,35 @@ static void handle_timer_events(void) {
     while (timer_head != (void *)0 && timer_head->expires_at <= now) {
         struct timer_event *n = timer_head;
         timer_head = n->next;
+        timer_callback_t cb = n->callback;
+        void *cb_arg = n->arg;
         timer_free_node(n);
+        if (cb) {
+            if (add_task((task_callback_t)cb, cb_arg, 1) < 0) {
+                cb(cb_arg);
+            }
+        }
+        now = rdtime();
+    }
+}
+
+static void run_pending_tasks(void) {
+    while (task_head != (void *)0) {
+        struct task_event *n = task_head;
+        if (task_current_priority > n->priority) {
+            return;
+        }
+        task_head = n->next;
+        task_free_node(n);
+
+        int prev_priority = task_current_priority;
+        task_current_priority = n->priority;
+        asm volatile("csrsi sstatus, 2");
         if (n->callback) {
             n->callback(n->arg);
         }
-        now = rdtime();
+        asm volatile("csrci sstatus, 2");
+        task_current_priority = prev_priority;
     }
 }
 
@@ -232,6 +320,7 @@ void do_trap(struct pt_regs *regs) {
     } else {
         handle_exception(regs->cause, regs);
     }
+    run_pending_tasks();
 }
 
 void trap_init(uint64_t hart_id) {
@@ -241,6 +330,7 @@ void trap_init(uint64_t hart_id) {
     write_sscratch(read_sp());
     plic_init();
     timer_pool_init();
+    task_pool_init();
     add_timer(periodic_tick_cb, (void *)0, 2);
     uart_enable_rx_interrupt();
     enable_sie_stie();

@@ -44,6 +44,11 @@ static void timeout_cb(void *arg) {
     free(t);
 }
 
+static void task_test_cb(void *arg) {
+    const char *label = (const char *)arg;
+    printf("[Task] Executing Priority %s\r\n", label);
+}
+
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
@@ -144,6 +149,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                        "  alloc_test - run spec test case (test_alloc_1).\r\n"
                        "  exec [file]- run user program in initrd.\r\n"
                        "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
+                       "  task_test  - enqueue task callbacks.\r\n"
                        "  ls         - list files in initrd.\r\n"
                        "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -161,6 +167,11 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "alloc_test") == 0) {
                 alloc_test();
+            } else if (strcmp(cmd_buf, "task_test") == 0) {
+                add_task(task_test_cb, (void *)"3", 3);
+                add_task(task_test_cb, (void *)"1", 1);
+                add_task(task_test_cb, (void *)"5", 5);
+                printf("task_test queued (run on next trap)\r\n");
             } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
                 const char *p = cmd_buf + 11;
                 int i = 0;
