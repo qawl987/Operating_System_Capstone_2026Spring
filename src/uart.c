@@ -26,6 +26,22 @@ static volatile unsigned int rx_r;
 static volatile unsigned int rx_w;
 static volatile unsigned int tx_r;
 static volatile unsigned int tx_w;
+static volatile int rx_overflow;
+
+static inline unsigned long irq_save(void) {
+    unsigned long s;
+    asm volatile("csrr %0, sstatus" : "=r"(s));
+    asm volatile("csrci sstatus, 2");
+    return s;
+}
+
+static inline void irq_restore(unsigned long s) {
+    if (s & 2UL) {
+        asm volatile("csrsi sstatus, 2");
+    } else {
+        asm volatile("csrci sstatus, 2");
+    }
+}
 
 void uart_init(unsigned long base) { uart_base = base; }
 
@@ -56,6 +72,7 @@ void uart_enable_tx_interrupt(void) { *uart_ier() |= IER_TX_ENABLE; }
 void uart_disable_tx_interrupt(void) { *uart_ier() &= ~IER_TX_ENABLE; }
 
 void uart_handle_irq(void) {
+    unsigned long irq_state = irq_save();
     /* --- PART 1: RECEIVE LOGIC (RX) --- */
     // Check if there is data ready in the hardware FIFO/Register
     // LSR_DR: Line Status Register - Data Ready
@@ -68,6 +85,8 @@ void uart_handle_irq(void) {
         if (n != rx_r) {
             rx_buf[rx_w] = c; // Put incoming byte in software buffer
             rx_w = n;         // Update write index
+        } else {
+            rx_overflow++;
         }
         // If buffer is full, the character 'c' is unfortunately dropped
     }
@@ -87,17 +106,23 @@ void uart_handle_irq(void) {
             uart_disable_tx_interrupt();
         }
     }
+    irq_restore(irq_state);
 }
 
 char uart_getc() {
-    while (rx_r == rx_w) {
+    while (1) {
+        unsigned long irq_state = irq_save();
+        if (rx_r != rx_w) {
+            char c = rx_buf[rx_r];
+            rx_r = next_idx(rx_r);
+            irq_restore(irq_state);
+            return c == '\r' ? '\n' : c;
+        }
+        irq_restore(irq_state);
         if ((*uart_lsr() & LSR_DR) != 0) {
             uart_handle_irq();
         }
     }
-    char c = rx_buf[rx_r];
-    rx_r = next_idx(rx_r);
-    return c == '\r' ? '\n' : c;
 }
 
 // Raw version without CR->LF conversion (for binary data)
@@ -111,17 +136,24 @@ void uart_putc(char c) {
     if (c == '\n')
         uart_putc('\r');
 
-    unsigned int n = next_idx(tx_w);
-    while (n == tx_r) {
+    while (1) {
+        unsigned long irq_state = irq_save();
+        unsigned int n = next_idx(tx_w);
+        if (n != tx_r) {
+            tx_buf[tx_w] = c;
+            tx_w = n;
+            uart_enable_tx_interrupt();
+            int tx_ready = ((*uart_lsr() & LSR_TDRQ) != 0);
+            irq_restore(irq_state);
+            if (tx_ready) {
+                uart_handle_irq();
+            }
+            return;
+        }
+        irq_restore(irq_state);
         if ((*uart_lsr() & LSR_TDRQ) != 0) {
             uart_handle_irq();
         }
-    }
-    tx_buf[tx_w] = c;
-    tx_w = n;
-    uart_enable_tx_interrupt();
-    if ((*uart_lsr() & LSR_TDRQ) != 0) {
-        uart_handle_irq();
     }
 }
 
@@ -180,3 +212,5 @@ void uart_putx(unsigned long h) {
         }
     }
 }
+
+int uart_rx_overflow_count(void) { return rx_overflow; }

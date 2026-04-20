@@ -109,8 +109,15 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
     int cmd_idx = 0;
+    int last_rx_overflow = 0;
 
     while (1) {
+        int cur_overflow = uart_rx_overflow_count();
+        if (cur_overflow != last_rx_overflow) {
+            printf("\r\n[Warn] UART RX overflow +%d (total=%d)\r\n",
+                   cur_overflow - last_rx_overflow, cur_overflow);
+            last_rx_overflow = cur_overflow;
+        }
         uart_puts("opi-rv2> ");
         cmd_idx = 0;
 

@@ -1,7 +1,7 @@
+#include "timer.h"
 #include "helper.h"
 #include "sbi.h"
 #include "task.h"
-#include "timer.h"
 #include "trap.h"
 
 #define TIMER_LIST_MAX 32
