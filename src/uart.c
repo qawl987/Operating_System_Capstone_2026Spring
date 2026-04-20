@@ -3,10 +3,11 @@
 #define UART_BASE 0xD4017000UL
 #define REG_SHIFT 2
 #define LSR_DR (1 << 0)
-#define LSR_TDRQ (1 << 6) // TEMT for PXA
+#define LSR_TDRQ (1 << 5) // THRE
 typedef volatile unsigned int uart_reg_t;
 #define IER_RX_ENABLE (1 << 0)
 #define IER_TX_ENABLE (1 << 1)
+#define MCR_OUT2 (1 << 3)
 #else
 // QEMU virt: 16550 UART, 8-bit registers
 #define UART_BASE 0x10000000UL
@@ -16,6 +17,7 @@ typedef volatile unsigned int uart_reg_t;
 typedef volatile unsigned char uart_reg_t;
 #define IER_RX_ENABLE (1 << 0)
 #define IER_TX_ENABLE (1 << 1)
+#define MCR_OUT2 (1 << 3)
 #endif
 
 static unsigned long uart_base = UART_BASE;
@@ -43,8 +45,6 @@ static inline void irq_restore(unsigned long s) {
     }
 }
 
-void uart_init(unsigned long base) { uart_base = base; }
-
 static inline uart_reg_t *uart_rbr(void) {
     return (uart_reg_t *)(uart_base + (0x0 << REG_SHIFT));
 }
@@ -59,6 +59,15 @@ static inline uart_reg_t *uart_lsr(void) {
 
 static inline uart_reg_t *uart_ier(void) {
     return (uart_reg_t *)(uart_base + (0x1 << REG_SHIFT));
+}
+
+static inline uart_reg_t *uart_mcr(void) {
+    return (uart_reg_t *)(uart_base + (0x4 << REG_SHIFT));
+}
+
+void uart_init(unsigned long base) {
+    uart_base = base;
+    *uart_mcr() |= MCR_OUT2;
 }
 
 static inline unsigned int next_idx(unsigned int idx) {

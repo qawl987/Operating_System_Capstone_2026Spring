@@ -1,4 +1,5 @@
 #include "helper.h"
+#include "config.h"
 #include "startup_alloc.h"
 #include "task.h"
 #include "timer.h"
@@ -14,7 +15,6 @@ extern void ret_from_exception(void);
 #define SCAUSE_SUPERVISOR_TIMER 5UL
 #define SCAUSE_SUPERVISOR_EXTERNAL 9UL
 #define SCAUSE_USER_ECALL 8UL
-#define UART_IRQ_ID 10U
 
 static uint64_t boot_hart_id;
 static uint64_t boot_time_base;
@@ -59,25 +59,31 @@ static inline uint32_t plic_read(uint64_t addr) {
 }
 
 static inline uint64_t plic_priority_addr(uint32_t irq) {
-    return 0x0c000000UL + ((uint64_t)irq << 2);
+    return PLIC_BASE + ((uint64_t)irq << 2);
 }
 
 static inline uint64_t plic_s_enable_addr(uint64_t hart) {
-    return 0x0c000000UL + 0x2080UL + (hart * 0x100UL);
+    return PLIC_BASE + PLIC_S_ENABLE_BASE + (hart * 0x80UL);
+}
+
+static inline uint64_t plic_s_enable_word_addr(uint64_t hart, uint32_t irq) {
+    return plic_s_enable_addr(hart) + (((uint64_t)irq / 32ULL) * 4ULL);
 }
 
 static inline uint64_t plic_s_threshold_addr(uint64_t hart) {
-    return 0x0c000000UL + 0x201000UL + (hart * 0x2000UL);
+    return PLIC_BASE + PLIC_S_THRESHOLD_BASE + (hart * 0x2000UL);
 }
 
 static inline uint64_t plic_s_claim_addr(uint64_t hart) {
-    return 0x0c000000UL + 0x201004UL + (hart * 0x2000UL);
+    return PLIC_BASE + PLIC_S_CLAIM_BASE + (hart * 0x2000UL);
 }
 
 static void plic_init(void) {
-    plic_write(plic_priority_addr(UART_IRQ_ID), 1);
-    plic_write(plic_s_enable_addr(boot_hart_id),
-               plic_read(plic_s_enable_addr(boot_hart_id)) | (1U << UART_IRQ_ID));
+    uint64_t en_addr = plic_s_enable_word_addr(boot_hart_id, UART0_IRQ_ID);
+    uint32_t en = plic_read(en_addr);
+    plic_write(plic_priority_addr(UART0_IRQ_ID), 1);
+    en |= (1U << (UART0_IRQ_ID % 32U));
+    plic_write(en_addr, en);
     plic_write(plic_s_threshold_addr(boot_hart_id), 0);
 }
 
@@ -105,7 +111,7 @@ static void handle_interrupt(unsigned long cause) {
 
     if (irq == SCAUSE_SUPERVISOR_EXTERNAL) {
         uint32_t claim = plic_claim();
-        if (claim == UART_IRQ_ID) {
+        if (claim == UART0_IRQ_ID) {
             uart_handle_irq();
         }
         if (claim != 0) {
@@ -135,9 +141,14 @@ void do_trap(struct pt_regs *regs) {
     task_run_pending();
 }
 
-void trap_init(uint64_t hart_id) {
+void trap_init(uint64_t hart_id, uint64_t timer_tick_hz) {
     boot_hart_id = hart_id;
     boot_time_base = rdtime();
+    if (timer_tick_hz > 0) {
+        timer_interval_ticks = timer_tick_hz * 2ULL;
+    } else {
+        timer_interval_ticks = TIMER_TICK_HZ * 2ULL;
+    }
     write_stvec((void *)handle_exception_entry);
     write_sscratch(read_sp());
     plic_init();
