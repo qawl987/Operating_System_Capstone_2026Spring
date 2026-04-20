@@ -5,6 +5,7 @@
 
 #define SBI_EXT_BASE 0x10
 #define SBI_EXT_TIME 0x54494D45
+#define SBI_EXT_LEGACY_SET_TIMER 0x00
 
 enum sbi_ext_base_fid {
     SBI_EXT_BASE_GET_SPEC_VERSION,
@@ -33,6 +34,7 @@ struct sbiret sbi_ecall(int ext, int fid, unsigned long arg0,
 long sbi_get_spec_version(void);
 long sbi_get_impl_id(void);
 long sbi_get_impl_version(void);
+long sbi_probe_extension(long extension_id);
 long sbi_set_timer(uint64_t stime_value);
 
 #endif /* SBI_H */

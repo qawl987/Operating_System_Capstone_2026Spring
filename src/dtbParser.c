@@ -292,3 +292,26 @@ int fdt_get_reserved_memory(const void *fdt, struct mem_region *regions, int max
 
     return count;
 }
+
+int fdt_get_timebase_frequency(const void *fdt, uint64_t *freq) {
+    int offset;
+    int len;
+    const void *prop;
+
+    if (freq == (void *)0) {
+        return -1;
+    }
+
+    offset = fdt_path_offset(fdt, "/cpus");
+    if (offset < 0) {
+        return -1;
+    }
+
+    prop = fdt_getprop(fdt, offset, "timebase-frequency", &len);
+    if (!prop || len < 4) {
+        return -1;
+    }
+
+    *freq = (uint64_t)bswap32(*(const uint32_t *)prop);
+    return 0;
+}

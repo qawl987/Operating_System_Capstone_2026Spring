@@ -104,7 +104,14 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
 
     /* Initialize memory system using startup allocator */
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
-    trap_init(hart_id);
+    uint64_t timebase = 0;
+    if (fdt_get_timebase_frequency(dtb_base, &timebase) == 0) {
+        printf("Timebase frequency: %d Hz\r\n", (unsigned int)timebase);
+    } else {
+        timebase = TIMER_TICK_HZ;
+        printf("Timebase frequency: fallback %d Hz\r\n", (unsigned int)timebase);
+    }
+    trap_init(hart_id, timebase);
 
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];

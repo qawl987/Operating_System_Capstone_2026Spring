@@ -1,4 +1,5 @@
 #include "sbi.h"
+#include "helper.h"
 
 struct sbiret sbi_ecall(int ext, int fid, unsigned long arg0,
                         unsigned long arg1, unsigned long arg2,
@@ -56,10 +57,48 @@ long sbi_get_impl_version(void) {
     return result.value;
 }
 
+long sbi_probe_extension(long extension_id) {
+    struct sbiret result = sbi_ecall(SBI_EXT_BASE, SBI_EXT_BASE_PROBE_EXT,
+                                     (unsigned long)extension_id, 0, 0, 0, 0, 0);
+    if (result.error) {
+        return 0;
+    }
+    return result.value;
+}
+
+static long sbi_set_timer_legacy(uint64_t stime_value) {
+    register unsigned long a0 asm("a0") = (unsigned long)stime_value;
+    register unsigned long a7 asm("a7") = (unsigned long)SBI_EXT_LEGACY_SET_TIMER;
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    return (long)a0;
+}
+
 long sbi_set_timer(uint64_t stime_value) {
-    struct sbiret result =
-        sbi_ecall(SBI_EXT_TIME, SBI_EXT_TIME_SET_TIMER,
-                  (unsigned long)stime_value, (unsigned long)(stime_value >> 32),
-                  0, 0, 0, 0);
-    return result.error;
+    static int timer_mode = -1; /* -1 unknown, 0 legacy, 1 time-ext */
+
+    if (timer_mode < 0) {
+        long probe = sbi_probe_extension(SBI_EXT_TIME);
+        long spec = sbi_get_spec_version();
+        printf("[SBI] spec=0x%x probe(TIME)=0x%x\n", (unsigned long)spec,
+               (unsigned long)probe);
+        timer_mode = (probe > 0) ? 1 : 0;
+        printf("[SBI] timer mode: %s\n", timer_mode ? "TIME" : "LEGACY");
+    }
+
+    if (timer_mode == 1) {
+        struct sbiret result =
+            sbi_ecall(SBI_EXT_TIME, SBI_EXT_TIME_SET_TIMER,
+                      (unsigned long)stime_value, 0, 0, 0, 0, 0);
+        if (result.error == -2) {
+            timer_mode = 0;
+            printf("[SBI] TIME unsupported, switching to LEGACY\n");
+            return sbi_set_timer_legacy(stime_value);
+        }
+        if (result.error) {
+            printf("[SBI] TIME set_timer err=%d\n", (int)result.error);
+        }
+        return result.error;
+    }
+
+    return sbi_set_timer_legacy(stime_value);
 }

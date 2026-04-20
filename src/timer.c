@@ -109,9 +109,17 @@ void timer_handle_irq(void) {
 
 void timer_program_next(void) {
     if (timer_head != (void *)0) {
-        sbi_set_timer(timer_head->expires_at);
+        long err = sbi_set_timer(timer_head->expires_at);
+        if (err) {
+            printf("[Timer] sbi_set_timer err=%d target=0x%x\n", (int)err,
+                   (unsigned long)timer_head->expires_at);
+        }
         return;
     }
     uint64_t now = rdtime();
-    sbi_set_timer(now + g_interval_ticks);
+    long err = sbi_set_timer(now + g_interval_ticks);
+    if (err) {
+        printf("[Timer] sbi_set_timer err=%d target=0x%x\n", (int)err,
+               (unsigned long)(now + g_interval_ticks));
+    }
 }

@@ -67,5 +67,6 @@ int fdt_get_memory_region(const void *fdt, struct mem_region *region);
  */
 int fdt_get_reserved_memory(const void *fdt, struct mem_region *regions,
                             int max_regions);
+int fdt_get_timebase_frequency(const void *fdt, uint64_t *freq);
 
 #endif /* DTBPARSER_H */
