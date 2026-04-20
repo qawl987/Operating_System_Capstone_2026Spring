@@ -49,6 +49,47 @@ static void task_test_cb(void *arg) {
     printf("[Task] Executing Priority %s\r\n", label);
 }
 
+static void nested_preempt_hi_cb(void *arg) {
+    (void)arg;
+    printf("[NestedDemo][HI] preempt task start (prio=9) at %d sec\r\n",
+           (int)trap_uptime_seconds());
+    for (volatile unsigned long i = 0; i < 600000UL; i++) {
+        asm volatile("" ::: "memory");
+    }
+    printf("[NestedDemo][HI] preempt task done at %d sec\r\n",
+           (int)trap_uptime_seconds());
+}
+
+static void nested_timer_kick_cb(void *arg) {
+    (void)arg;
+    printf("[NestedDemo][TIMER] irq callback at %d sec, queue HI task\r\n",
+           (int)trap_uptime_seconds());
+    add_task(nested_preempt_hi_cb, (void *)0, 9);
+}
+
+static void nested_demo_cb(void *arg) {
+    (void)arg;
+    uint64_t start = trap_uptime_seconds();
+    uint64_t end = start + 6;
+    uint64_t last = (uint64_t)-1;
+    printf("[NestedDemo] start LOW task (prio=1) at %d sec\r\n", (int)start);
+    printf("[NestedDemo] arm +1s timer, expect TIMER+HI insert while LOW runs\r\n");
+    if (add_timer(nested_timer_kick_cb, (void *)0, 1) < 0) {
+        printf("[NestedDemo] failed to arm demo timer\r\n");
+    }
+    while (trap_uptime_seconds() < end) {
+        uint64_t now = trap_uptime_seconds();
+        if (now != last) {
+            printf("[NestedDemo][LOW] running... now=%d\r\n", (int)now);
+            last = now;
+        }
+        for (volatile unsigned long i = 0; i < 200000UL; i++) {
+            asm volatile("" ::: "memory");
+        }
+    }
+    printf("[NestedDemo][LOW] done at %d sec\r\n", (int)trap_uptime_seconds());
+}
+
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
@@ -165,6 +206,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                     "  exec [file]- run user program in initrd.\r\n"
                     "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
                     "  task_test  - enqueue task callbacks.\r\n"
+                    "  nested_test- demo nested interrupt + task preemption.\r\n"
                     "  ls         - list files in initrd.\r\n"
                     "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -187,6 +229,9 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 add_task(task_test_cb, (void *)"3", 3);
                 add_task(task_test_cb, (void *)"1", 1);
                 add_task(task_test_cb, (void *)"5", 5);
+            } else if (strcmp(cmd_buf, "nested_test") == 0) {
+                printf("nested_test queued (LOW task + TIMER + HI preemption)\r\n");
+                add_task(nested_demo_cb, (void *)0, 1);
             } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
                 const char *p = cmd_buf + 11;
                 int i = 0;
