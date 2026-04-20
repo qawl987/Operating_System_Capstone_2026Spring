@@ -29,6 +29,7 @@ static volatile unsigned int rx_w;
 static volatile unsigned int tx_r;
 static volatile unsigned int tx_w;
 static volatile int rx_overflow;
+static volatile int uart_polling_mode;
 
 static inline unsigned long irq_save(void) {
     unsigned long s;
@@ -67,6 +68,11 @@ static inline uart_reg_t *uart_mcr(void) {
 
 void uart_init(unsigned long base) {
     uart_base = base;
+    uart_polling_mode = 0;
+    rx_r = 0;
+    rx_w = 0;
+    tx_r = 0;
+    tx_w = 0;
     *uart_mcr() |= MCR_OUT2;
 }
 
@@ -79,6 +85,17 @@ void uart_enable_rx_interrupt(void) { *uart_ier() |= IER_RX_ENABLE; }
 void uart_enable_tx_interrupt(void) { *uart_ier() |= IER_TX_ENABLE; }
 
 void uart_disable_tx_interrupt(void) { *uart_ier() &= ~IER_TX_ENABLE; }
+
+void uart_enter_polling_mode(void) {
+    unsigned long irq_state = irq_save();
+    uart_polling_mode = 1;
+    rx_r = 0;
+    rx_w = 0;
+    tx_r = 0;
+    tx_w = 0;
+    *uart_ier() &= ~(IER_RX_ENABLE | IER_TX_ENABLE);
+    irq_restore(irq_state);
+}
 
 void uart_handle_irq(void) {
     unsigned long irq_state = irq_save();
@@ -136,6 +153,11 @@ char uart_getc() {
 
 // Raw version without CR->LF conversion (for binary data)
 char uart_getc_raw() {
+    if (uart_polling_mode) {
+        while ((*uart_lsr() & LSR_DR) == 0)
+            ;
+        return (char)*uart_rbr();
+    }
     while ((*uart_lsr() & LSR_DR) == 0)
         ;
     return (char)*uart_rbr();
@@ -144,6 +166,12 @@ char uart_getc_raw() {
 void uart_putc(char c) {
     if (c == '\n')
         uart_putc('\r');
+    if (uart_polling_mode) {
+        while ((*uart_lsr() & LSR_TDRQ) == 0)
+            ;
+        *uart_thr() = (uart_reg_t)c;
+        return;
+    }
 
     while (1) {
         unsigned long irq_state = irq_save();

@@ -7,6 +7,7 @@ void uart_enable_tx_interrupt(void);
 void uart_disable_tx_interrupt(void);
 void uart_handle_irq(void);
 int uart_rx_overflow_count(void);
+void uart_enter_polling_mode(void);
 char uart_getc(void);
 char uart_getc_raw(void);
 void uart_putc(char c);

@@ -19,6 +19,7 @@ extern void ret_from_exception(void);
 static uint64_t boot_hart_id;
 static uint64_t boot_time_base;
 static uint64_t timer_interval_ticks = TIMER_INTERVAL_TICKS;
+static int loader_mode;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;
@@ -27,6 +28,7 @@ static inline uint64_t rdtime(void) {
 }
 
 static inline void enable_sstatus_sie(void) { asm volatile("csrsi sstatus, 2"); }
+static inline void disable_sstatus_sie(void) { asm volatile("csrci sstatus, 2"); }
 
 static inline void enable_sie_stie(void) {
     asm volatile("li t0, (1 << 5)\n\tcsrs sie, t0" : : : "t0");
@@ -101,6 +103,11 @@ uint64_t trap_uptime_seconds(void) {
     return (now - boot_time_base) / (timer_interval_ticks / 2);
 }
 
+void trap_enter_loader_mode(void) {
+    loader_mode = 1;
+    disable_sstatus_sie();
+}
+
 static void handle_interrupt(unsigned long cause) {
     unsigned long irq = cause & ~SCAUSE_INTERRUPT_BIT;
     if (irq == SCAUSE_SUPERVISOR_TIMER) {
@@ -133,6 +140,9 @@ static void handle_exception(unsigned long cause, struct pt_regs *regs) {
 }
 
 void do_trap(struct pt_regs *regs) {
+    if (loader_mode) {
+        return;
+    }
     if (regs->cause & SCAUSE_INTERRUPT_BIT) {
         handle_interrupt(regs->cause);
     } else {
@@ -142,6 +152,7 @@ void do_trap(struct pt_regs *regs) {
 }
 
 void trap_init(uint64_t hart_id, uint64_t timer_tick_hz) {
+    loader_mode = 0;
     boot_hart_id = hart_id;
     boot_time_base = rdtime();
     if (timer_tick_hz > 0) {

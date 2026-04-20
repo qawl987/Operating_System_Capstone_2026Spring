@@ -48,6 +48,7 @@ typedef void (*task_callback_t)(void *arg);
 void trap_init(uint64_t hart_id, uint64_t timer_tick_hz);
 int trap_exec_user(const void *entry, size_t size);
 void do_trap(struct pt_regs *regs);
+void trap_enter_loader_mode(void);
 int add_timer(timer_callback_t callback, void *arg, int sec);
 int add_task(task_callback_t callback, void *arg, int priority);
 uint64_t trap_uptime_seconds(void);

@@ -1,5 +1,6 @@
 #include "config.h"
 #include "helper.h"
+#include "trap.h"
 #include "uart.h"
 #include <stdint.h>
 
@@ -84,6 +85,8 @@ static void do_load_kernel(void *dtb) {
 // Entry point for load command
 // First relocate bootloader to high memory, then execute do_load_kernel from there
 void load_kernel(void *dtb) {
+    trap_enter_loader_mode();
+    uart_enter_polling_mode();
     uart_puts("Relocating bootloader to high memory...\r\n");
 
     // Calculate do_load_kernel address in high memory
