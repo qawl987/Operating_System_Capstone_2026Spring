@@ -1,6 +1,7 @@
 #include "helper.h"
-#include "sbi.h"
 #include "startup_alloc.h"
+#include "task.h"
+#include "timer.h"
 #include "trap.h"
 #include "uart.h"
 
@@ -9,8 +10,6 @@ extern void ret_from_exception(void);
 
 #define USER_STACK_SIZE 0x1000UL
 #define TIMER_INTERVAL_TICKS 20000000ULL
-#define TIMER_LIST_MAX 32
-#define TASK_LIST_MAX 64
 #define SCAUSE_INTERRUPT_BIT (1UL << 63)
 #define SCAUSE_SUPERVISOR_TIMER 5UL
 #define SCAUSE_SUPERVISOR_EXTERNAL 9UL
@@ -20,29 +19,6 @@ extern void ret_from_exception(void);
 static uint64_t boot_hart_id;
 static uint64_t boot_time_base;
 static uint64_t timer_interval_ticks = TIMER_INTERVAL_TICKS;
-
-struct timer_event {
-    uint64_t expires_at;
-    timer_callback_t callback;
-    void *arg;
-    struct timer_event *next;
-};
-
-static struct timer_event timer_pool[TIMER_LIST_MAX];
-static struct timer_event *timer_free_list;
-static struct timer_event *timer_head;
-
-struct task_event {
-    int priority;
-    task_callback_t callback;
-    void *arg;
-    struct task_event *next;
-};
-
-static struct task_event task_pool[TASK_LIST_MAX];
-static struct task_event *task_free_list;
-static struct task_event *task_head;
-static int task_current_priority = -2147483647;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;
@@ -111,125 +87,6 @@ static void plic_complete(uint32_t irq) {
     plic_write(plic_s_claim_addr(boot_hart_id), irq);
 }
 
-static void timer_pool_init(void) {
-    timer_free_list = &timer_pool[0];
-    for (int i = 0; i < TIMER_LIST_MAX - 1; i++) {
-        timer_pool[i].next = &timer_pool[i + 1];
-    }
-    timer_pool[TIMER_LIST_MAX - 1].next = (void *)0;
-    timer_head = (void *)0;
-}
-
-static void task_pool_init(void) {
-    task_free_list = &task_pool[0];
-    for (int i = 0; i < TASK_LIST_MAX - 1; i++) {
-        task_pool[i].next = &task_pool[i + 1];
-    }
-    task_pool[TASK_LIST_MAX - 1].next = (void *)0;
-    task_head = (void *)0;
-}
-
-static struct timer_event *timer_alloc_node(void) {
-    struct timer_event *n = timer_free_list;
-    if (n != (void *)0) {
-        timer_free_list = n->next;
-        n->next = (void *)0;
-    }
-    return n;
-}
-
-static void timer_free_node(struct timer_event *n) {
-    n->next = timer_free_list;
-    timer_free_list = n;
-}
-
-static struct task_event *task_alloc_node(void) {
-    struct task_event *n = task_free_list;
-    if (n != (void *)0) {
-        task_free_list = n->next;
-        n->next = (void *)0;
-    }
-    return n;
-}
-
-static void task_free_node(struct task_event *n) {
-    n->next = task_free_list;
-    task_free_list = n;
-}
-
-static void program_timer_absolute(uint64_t target) {
-    sbi_set_timer(target);
-}
-
-static void program_next_timer(void) {
-    if (timer_head != (void *)0) {
-        program_timer_absolute(timer_head->expires_at);
-        return;
-    }
-    uint64_t now = rdtime();
-    program_timer_absolute(now + timer_interval_ticks);
-}
-
-int add_timer(timer_callback_t callback, void *arg, int sec) {
-    if (callback == (void *)0 || sec < 0) {
-        return -1;
-    }
-
-    struct timer_event *n = timer_alloc_node();
-    if (n == (void *)0) {
-        return -1;
-    }
-
-    uint64_t now = rdtime();
-    uint64_t delay_ticks = (uint64_t)sec * timer_interval_ticks / 2;
-    n->expires_at = now + delay_ticks;
-    n->callback = callback;
-    n->arg = arg;
-
-    if (timer_head == (void *)0 || n->expires_at < timer_head->expires_at) {
-        n->next = timer_head;
-        timer_head = n;
-        program_next_timer();
-        return 0;
-    }
-
-    struct timer_event *cur = timer_head;
-    while (cur->next != (void *)0 && cur->next->expires_at <= n->expires_at) {
-        cur = cur->next;
-    }
-    n->next = cur->next;
-    cur->next = n;
-    return 0;
-}
-
-int add_task(task_callback_t callback, void *arg, int priority) {
-    if (callback == (void *)0) {
-        return -1;
-    }
-
-    struct task_event *n = task_alloc_node();
-    if (n == (void *)0) {
-        return -1;
-    }
-    n->priority = priority;
-    n->callback = callback;
-    n->arg = arg;
-
-    if (task_head == (void *)0 || priority > task_head->priority) {
-        n->next = task_head;
-        task_head = n;
-        return 0;
-    }
-
-    struct task_event *cur = task_head;
-    while (cur->next != (void *)0 && cur->next->priority >= priority) {
-        cur = cur->next;
-    }
-    n->next = cur->next;
-    cur->next = n;
-    return 0;
-}
-
 uint64_t trap_uptime_seconds(void) {
     uint64_t now = rdtime();
     if (now < boot_time_base) {
@@ -238,56 +95,11 @@ uint64_t trap_uptime_seconds(void) {
     return (now - boot_time_base) / (timer_interval_ticks / 2);
 }
 
-static void periodic_tick_cb(void *arg) {
-    (void)arg;
-    printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
-    if (add_timer(periodic_tick_cb, (void *)0, 2) < 0) {
-        printf("[Timer] failed to schedule periodic tick\n");
-    }
-}
-
-static void handle_timer_events(void) {
-    uint64_t now = rdtime();
-    while (timer_head != (void *)0 && timer_head->expires_at <= now) {
-        struct timer_event *n = timer_head;
-        timer_head = n->next;
-        timer_callback_t cb = n->callback;
-        void *cb_arg = n->arg;
-        timer_free_node(n);
-        if (cb) {
-            if (add_task((task_callback_t)cb, cb_arg, 1) < 0) {
-                cb(cb_arg);
-            }
-        }
-        now = rdtime();
-    }
-}
-
-static void run_pending_tasks(void) {
-    while (task_head != (void *)0) {
-        struct task_event *n = task_head;
-        if (task_current_priority > n->priority) {
-            return;
-        }
-        task_head = n->next;
-        task_free_node(n);
-
-        int prev_priority = task_current_priority;
-        task_current_priority = n->priority;
-        asm volatile("csrsi sstatus, 2");
-        if (n->callback) {
-            n->callback(n->arg);
-        }
-        asm volatile("csrci sstatus, 2");
-        task_current_priority = prev_priority;
-    }
-}
-
 static void handle_interrupt(unsigned long cause) {
     unsigned long irq = cause & ~SCAUSE_INTERRUPT_BIT;
     if (irq == SCAUSE_SUPERVISOR_TIMER) {
-        handle_timer_events();
-        program_next_timer();
+        timer_handle_irq();
+        timer_program_next();
         return;
     }
 
@@ -320,7 +132,7 @@ void do_trap(struct pt_regs *regs) {
     } else {
         handle_exception(regs->cause, regs);
     }
-    run_pending_tasks();
+    task_run_pending();
 }
 
 void trap_init(uint64_t hart_id) {
@@ -329,14 +141,13 @@ void trap_init(uint64_t hart_id) {
     write_stvec((void *)handle_exception_entry);
     write_sscratch(read_sp());
     plic_init();
-    timer_pool_init();
-    task_pool_init();
-    add_timer(periodic_tick_cb, (void *)0, 2);
+    task_init();
+    timer_init(boot_time_base, timer_interval_ticks);
     uart_enable_rx_interrupt();
     enable_sie_stie();
     enable_sie_seie();
     enable_sstatus_sie();
-    program_next_timer();
+    timer_program_next();
 }
 
 int trap_exec_user(const void *entry, size_t size) {

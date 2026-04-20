@@ -140,18 +140,19 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
 
         if (cmd_idx > 0) {
             if (strcmp(cmd_buf, "help") == 0) {
-                printf("Available commands:\r\n"
-                       "  help       - show all commands.\r\n"
-                       "  hello      - print hello world.\r\n"
-                       "  info       - print system info.\r\n"
-                       "  meminfo    - show memory status.\r\n"
-                       "  load       - load kernel via UART.\r\n"
-                       "  alloc_test - run spec test case (test_alloc_1).\r\n"
-                       "  exec [file]- run user program in initrd.\r\n"
-                       "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
-                       "  task_test  - enqueue task callbacks.\r\n"
-                       "  ls         - list files in initrd.\r\n"
-                       "  cat <file> - display file content.\r\n");
+                printf(
+                    "Available commands:\r\n"
+                    "  help       - show all commands.\r\n"
+                    "  hello      - print hello world.\r\n"
+                    "  info       - print system info.\r\n"
+                    "  meminfo    - show memory status.\r\n"
+                    "  load       - load kernel via UART.\r\n"
+                    "  alloc_test - run spec test case (test_alloc_1).\r\n"
+                    "  exec [file]- run user program in initrd.\r\n"
+                    "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
+                    "  task_test  - enqueue task callbacks.\r\n"
+                    "  ls         - list files in initrd.\r\n"
+                    "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
                 printf("Hello world.\r\n");
             } else if (strcmp(cmd_buf, "info") == 0) {
@@ -168,10 +169,10 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
             } else if (strcmp(cmd_buf, "alloc_test") == 0) {
                 alloc_test();
             } else if (strcmp(cmd_buf, "task_test") == 0) {
+                printf("task_test queued (run on next trap)\r\n");
                 add_task(task_test_cb, (void *)"3", 3);
                 add_task(task_test_cb, (void *)"1", 1);
                 add_task(task_test_cb, (void *)"5", 5);
-                printf("task_test queued (run on next trap)\r\n");
             } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
                 const char *p = cmd_buf + 11;
                 int i = 0;
@@ -198,8 +199,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                         printf("setTimeout: empty message\r\n");
                         continue;
                     }
-                    struct timeout_msg *t =
-                        (struct timeout_msg *)allocate(sizeof(struct timeout_msg));
+                    struct timeout_msg *t = (struct timeout_msg *)allocate(
+                        sizeof(struct timeout_msg));
                     if (t == (void *)0) {
                         printf("setTimeout: no memory\r\n");
                         continue;
@@ -221,9 +222,9 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 }
                 if (g_initrd_start && g_initrd_end) {
                     size_t fsize = 0;
-                    const void *entry =
-                        initrd_find_file((void *)g_initrd_start,
-                                         (void *)g_initrd_end, filename, &fsize);
+                    const void *entry = initrd_find_file((void *)g_initrd_start,
+                                                         (void *)g_initrd_end,
+                                                         filename, &fsize);
                     if (!entry) {
                         printf("exec: %s not found\r\n", filename);
                     } else if (trap_exec_user(entry, fsize) < 0) {
