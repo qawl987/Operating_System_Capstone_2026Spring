@@ -18,6 +18,7 @@ static struct timer_event *timer_free_list;
 static struct timer_event *timer_head;
 static uint64_t g_boot_time_base;
 static uint64_t g_interval_ticks;
+static int g_periodic_log_enabled = 1;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;
@@ -41,10 +42,16 @@ static void timer_free_node(struct timer_event *n) {
 
 static void periodic_tick_cb(void *arg) {
     (void)arg;
-    printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
+    if (g_periodic_log_enabled) {
+        printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
+    }
     if (add_timer(periodic_tick_cb, (void *)0, 2) < 0) {
         printf("[Timer] failed to schedule periodic tick\n");
     }
+}
+
+void timer_set_periodic_log_enabled(int enabled) {
+    g_periodic_log_enabled = (enabled != 0);
 }
 
 void timer_init(uint64_t boot_time_base, uint64_t interval_ticks) {

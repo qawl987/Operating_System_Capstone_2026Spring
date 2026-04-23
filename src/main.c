@@ -7,6 +7,7 @@
 #include "kmalloc.h"
 #include "sbi.h"
 #include "startup_alloc.h"
+#include "timer.h"
 #include "trap.h"
 #include "uart.h"
 
@@ -207,6 +208,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                     "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
                     "  task_test  - enqueue task callbacks.\r\n"
                     "  nested_test- demo nested interrupt + task preemption.\r\n"
+                    "  close_timer- hide periodic 2s timer log output.\r\n"
+                    "  open_timer - show periodic 2s timer log output.\r\n"
                     "  ls         - list files in initrd.\r\n"
                     "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -232,6 +235,12 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
             } else if (strcmp(cmd_buf, "nested_test") == 0) {
                 printf("nested_test queued (LOW task + TIMER + HI preemption)\r\n");
                 add_task(nested_demo_cb, (void *)0, 1);
+            } else if (strcmp(cmd_buf, "close_timer") == 0) {
+                timer_set_periodic_log_enabled(0);
+                printf("timer periodic log: OFF\r\n");
+            } else if (strcmp(cmd_buf, "open_timer") == 0) {
+                timer_set_periodic_log_enabled(1);
+                printf("timer periodic log: ON\r\n");
             } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
                 const char *p = cmd_buf + 11;
                 int i = 0;
