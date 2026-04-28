@@ -11,6 +11,51 @@
 #include "trap.h"
 #include "uart.h"
 
+int priority_set[4];
+
+void p1_callback() {
+    uart_puts("P1 start\n");
+    uart_puts("P1 end\n");
+}
+
+void p3_callback() {
+    uart_puts("P3 start\n");
+    add_task(p1_callback, NULL, priority_set[0]);
+    add_timer(NULL, NULL, 0);
+    uart_puts("P3 end\n");
+}
+
+void p2_callback() {
+    uart_puts("P2 start\n");
+    add_task(p3_callback, NULL, priority_set[2]);
+    add_timer(NULL, NULL, 0);
+    uart_puts("P2 end\n");
+}
+
+void p4_callback() {
+    uart_puts("P4 start\n");
+    add_task(p2_callback, NULL, priority_set[1]);
+    add_timer(NULL, NULL, 0);
+    uart_puts("P4 end\n");
+}
+
+void test_func() {
+    int from_small_to_big =
+        0; // set to 0 if the task with a smaller number has a higher priority
+    if (from_small_to_big) {
+        priority_set[0] = 10;
+        priority_set[1] = 20;
+        priority_set[2] = 30;
+        priority_set[3] = 40;
+    } else {
+        priority_set[0] = 40;
+        priority_set[1] = 30;
+        priority_set[2] = 20;
+        priority_set[3] = 10;
+    }
+
+    add_task(p4_callback, NULL, priority_set[3]);
+}
 /* Global state for initrd addresses */
 static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
@@ -74,7 +119,8 @@ static void nested_demo_cb(void *arg) {
     uint64_t end = start + 6;
     uint64_t last = (uint64_t)-1;
     printf("[NestedDemo] start LOW task (prio=1) at %d sec\r\n", (int)start);
-    printf("[NestedDemo] arm +1s timer, expect TIMER+HI insert while LOW runs\r\n");
+    printf("[NestedDemo] arm +1s timer, expect TIMER+HI insert while LOW "
+           "runs\r\n");
     if (add_timer(nested_timer_kick_cb, (void *)0, 1) < 0) {
         printf("[NestedDemo] failed to arm demo timer\r\n");
     }
@@ -151,7 +197,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
         printf("Timebase frequency: %d Hz\r\n", (unsigned int)timebase);
     } else {
         timebase = TIMER_TICK_HZ;
-        printf("Timebase frequency: fallback %d Hz\r\n", (unsigned int)timebase);
+        printf("Timebase frequency: fallback %d Hz\r\n",
+               (unsigned int)timebase);
     }
     trap_init(hart_id, timebase);
 
@@ -207,9 +254,11 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                     "  exec [file]- run user program in initrd.\r\n"
                     "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
                     "  task_test  - enqueue task callbacks.\r\n"
-                    "  nested_test- demo nested interrupt + task preemption.\r\n"
+                    "  nested_test- demo nested interrupt + task "
+                    "preemption.\r\n"
                     "  close_timer- hide periodic 2s timer log output.\r\n"
                     "  open_timer - show periodic 2s timer log output.\r\n"
+                    "  adv2_test  - run nested-task testcase.\r\n"
                     "  ls         - list files in initrd.\r\n"
                     "  cat <file> - display file content.\r\n");
             } else if (strcmp(cmd_buf, "hello") == 0) {
@@ -233,7 +282,8 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 add_task(task_test_cb, (void *)"1", 1);
                 add_task(task_test_cb, (void *)"5", 5);
             } else if (strcmp(cmd_buf, "nested_test") == 0) {
-                printf("nested_test queued (LOW task + TIMER + HI preemption)\r\n");
+                printf("nested_test queued (LOW task + TIMER + HI "
+                       "preemption)\r\n");
                 add_task(nested_demo_cb, (void *)0, 1);
             } else if (strcmp(cmd_buf, "close_timer") == 0) {
                 timer_set_periodic_log_enabled(0);
@@ -241,6 +291,9 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
             } else if (strcmp(cmd_buf, "open_timer") == 0) {
                 timer_set_periodic_log_enabled(1);
                 printf("timer periodic log: ON\r\n");
+            } else if (strcmp(cmd_buf, "adv2_test") == 0) {
+                printf("adv2_test queued\r\n");
+                add_timer(test_func, NULL, 0);
             } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
                 const char *p = cmd_buf + 11;
                 int i = 0;
