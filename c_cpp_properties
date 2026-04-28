@@ -1,0 +1,121 @@
+{
+    "configurations": [
+        {
+            "name": "Lab4 (QEMU)",
+            "includePath": [
+                "${workspaceFolder}/lab4-qawl987/include",
+                "${workspaceFolder}/lab4-qawl987/src"
+            ],
+            "defines": [
+                "PLATFORM_QEMU"
+            ],
+            "compilerPath": "/usr/bin/riscv64-unknown-elf-gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-mcmodel=medany",
+                "-ffreestanding",
+                "-nostdlib",
+                "-fPIE",
+                "-I",
+                "${workspaceFolder}/lab4-qawl987/include"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/lab4-qawl987/include",
+                    "${workspaceFolder}/lab4-qawl987/src"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        },
+        {
+            "name": "Lab3 (QEMU)",
+            "includePath": [
+                "${workspaceFolder}/lab3-qawl987/include",
+                "${workspaceFolder}/lab3-qawl987/src"
+            ],
+            "defines": [
+                "PLATFORM_QEMU"
+            ],
+            "compilerPath": "/usr/bin/riscv64-unknown-elf-gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-mcmodel=medany",
+                "-ffreestanding",
+                "-nostdlib",
+                "-fPIE",
+                "-I",
+                "${workspaceFolder}/lab3-qawl987/include"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/lab3-qawl987/include",
+                    "${workspaceFolder}/lab3-qawl987/src"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        },
+        {
+            "name": "Lab2 (QEMU)",
+            "includePath": [
+                "${workspaceFolder}/lab2-qawl987/include",
+                "${workspaceFolder}/lab2-qawl987/src"
+            ],
+            "defines": [
+                "PLATFORM_QEMU"
+            ],
+            "compilerPath": "/usr/bin/riscv64-unknown-elf-gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-mcmodel=medany",
+                "-ffreestanding",
+                "-nostdlib",
+                "-fPIE",
+                "-I",
+                "${workspaceFolder}/lab2-qawl987/include"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/lab2-qawl987/include",
+                    "${workspaceFolder}/lab2-qawl987/src"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        },
+        {
+            "name": "Lab1 (QEMU)",
+            "includePath": [
+                "${workspaceFolder}/lab1-qawl987/include",
+                "${workspaceFolder}/lab1-qawl987/src"
+            ],
+            "defines": [
+                "PLATFORM_QEMU"
+            ],
+            "compilerPath": "/usr/bin/riscv64-unknown-elf-gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-mcmodel=medany",
+                "-ffreestanding",
+                "-nostdlib",
+                "-fPIE",
+                "-I",
+                "${workspaceFolder}/lab1-qawl987/include"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/lab1-qawl987/include",
+                    "${workspaceFolder}/lab1-qawl987/src"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}
