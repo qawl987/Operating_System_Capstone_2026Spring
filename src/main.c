@@ -7,8 +7,10 @@
 #include "kmalloc.h"
 #include "sbi.h"
 #include "startup_alloc.h"
+#include "task.h"
 #include "timer.h"
 #include "trap.h"
+#include "thread.h"
 #include "uart.h"
 /* Global state for initrd addresses */
 static unsigned long g_initrd_start = 0;
@@ -91,6 +93,17 @@ static void nested_demo_cb(void *arg) {
     printf("[NestedDemo][LOW] done at %d sec\r\n", (int)trap_uptime_seconds());
 }
 
+static void stage1_foo(void) {
+    for (int i = 0; i < 5; i++) {
+        printf("Thread id: %d %d\r\n", get_current()->pid, i);
+        for (volatile int j = 0; j < 100000000; j++) {
+            asm volatile("" ::: "memory");
+        }
+        schedule();
+    }
+    thread_exit();
+}
+
 void start_kernel(uint64_t hart_id, void *dtb_base) {
     // Parse DTB to get UART base address and initialize UART
     // Try both paths: OrangePi RV2 uses "/soc/serial", QEMU uses "/soc/uart"
@@ -146,6 +159,12 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
 
     /* Initialize memory system using startup allocator */
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
+    thread_system_init();
+    for (int i = 0; i < 3; i++) {
+        thread_create(stage1_foo);
+    }
+    idle();
+
     uint64_t timebase = 0;
     if (fdt_get_timebase_frequency(dtb_base, &timebase) == 0) {
         printf("Timebase frequency: %d Hz\r\n", (unsigned int)timebase);

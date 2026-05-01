@@ -1,4 +1,5 @@
 #include "task.h"
+#include "uart.h"
 
 #define TASK_LIST_MAX 64
 
