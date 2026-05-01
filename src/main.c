@@ -10,52 +10,6 @@
 #include "timer.h"
 #include "trap.h"
 #include "uart.h"
-
-int priority_set[4];
-
-void p1_callback() {
-    uart_puts("P1 start\n");
-    uart_puts("P1 end\n");
-}
-
-void p3_callback() {
-    uart_puts("P3 start\n");
-    add_task(p1_callback, NULL, priority_set[0]);
-    add_timer(NULL, NULL, 0);
-    uart_puts("P3 end\n");
-}
-
-void p2_callback() {
-    uart_puts("P2 start\n");
-    add_task(p3_callback, NULL, priority_set[2]);
-    add_timer(NULL, NULL, 0);
-    uart_puts("P2 end\n");
-}
-
-void p4_callback() {
-    uart_puts("P4 start\n");
-    add_task(p2_callback, NULL, priority_set[1]);
-    add_timer(NULL, NULL, 0);
-    uart_puts("P4 end\n");
-}
-
-void test_func() {
-    int from_small_to_big =
-        0; // set to 0 if the task with a smaller number has a higher priority
-    if (from_small_to_big) {
-        priority_set[0] = 10;
-        priority_set[1] = 20;
-        priority_set[2] = 30;
-        priority_set[3] = 40;
-    } else {
-        priority_set[0] = 40;
-        priority_set[1] = 30;
-        priority_set[2] = 20;
-        priority_set[3] = 10;
-    }
-
-    add_task(p4_callback, NULL, priority_set[3]);
-}
 /* Global state for initrd addresses */
 static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
@@ -293,7 +247,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 printf("timer periodic log: ON\r\n");
             } else if (strcmp(cmd_buf, "adv2_test") == 0) {
                 printf("adv2_test queued\r\n");
-                add_timer(test_func, NULL, 0);
+                task_queue_adv2_test();
             } else if (strncmp(cmd_buf, "setTimeout ", 11) == 0) {
                 const char *p = cmd_buf + 11;
                 int i = 0;

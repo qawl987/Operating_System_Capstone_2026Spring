@@ -2,6 +2,8 @@
 
 #define TASK_LIST_MAX 64
 
+static int adv2_priority_set[4];
+
 struct task_event {
     int priority;
     task_callback_t callback;
@@ -13,6 +15,53 @@ static struct task_event task_pool[TASK_LIST_MAX];
 static struct task_event *task_free_list;
 static struct task_event *task_head;
 static int task_current_priority = -2147483647;
+
+static void adv2_p1_callback(void *arg) {
+    (void)arg;
+    uart_puts("P1 start\n");
+    uart_puts("P1 end\n");
+}
+
+static void adv2_p3_callback(void *arg) {
+    (void)arg;
+    uart_puts("P3 start\n");
+    add_task(adv2_p1_callback, (void *)0, adv2_priority_set[0]);
+    add_timer((void *)0, (void *)0, 0);
+    uart_puts("P3 end\n");
+}
+
+static void adv2_p2_callback(void *arg) {
+    (void)arg;
+    uart_puts("P2 start\n");
+    add_task(adv2_p3_callback, (void *)0, adv2_priority_set[2]);
+    add_timer((void *)0, (void *)0, 0);
+    uart_puts("P2 end\n");
+}
+
+static void adv2_p4_callback(void *arg) {
+    (void)arg;
+    uart_puts("P4 start\n");
+    add_task(adv2_p2_callback, (void *)0, adv2_priority_set[1]);
+    add_timer((void *)0, (void *)0, 0);
+    uart_puts("P4 end\n");
+}
+
+static void adv2_test_func(void *arg) {
+    (void)arg;
+    int from_small_to_big = 0;
+    if (from_small_to_big) {
+        adv2_priority_set[0] = 10;
+        adv2_priority_set[1] = 20;
+        adv2_priority_set[2] = 30;
+        adv2_priority_set[3] = 40;
+    } else {
+        adv2_priority_set[0] = 40;
+        adv2_priority_set[1] = 30;
+        adv2_priority_set[2] = 20;
+        adv2_priority_set[3] = 10;
+    }
+    add_task(adv2_p4_callback, (void *)0, adv2_priority_set[3]);
+}
 
 static struct task_event *task_alloc_node(void) {
     struct task_event *n = task_free_list;
@@ -84,3 +133,5 @@ void task_run_pending(void) {
         task_current_priority = prev_priority;
     }
 }
+
+void task_queue_adv2_test(void) { add_timer(adv2_test_func, (void *)0, 0); }
