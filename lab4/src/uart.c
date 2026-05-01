@@ -21,7 +21,7 @@ typedef volatile unsigned char uart_reg_t;
 #endif
 
 static unsigned long uart_base = UART_BASE;
-#define UART_BUF_SIZE 256
+#define UART_BUF_SIZE 512
 static char rx_buf[UART_BUF_SIZE];
 static char tx_buf[UART_BUF_SIZE];
 static volatile unsigned int rx_r;
@@ -195,6 +195,13 @@ void uart_putc(char c) {
 }
 
 void uart_puts(const char *s) {
+    unsigned long irq_state = irq_save();
+    while (*s)
+        uart_putc(*s++);
+    irq_restore(irq_state);
+}
+
+void uart_puts_boot(const char *s) {
     while (*s)
         uart_putc(*s++);
 }

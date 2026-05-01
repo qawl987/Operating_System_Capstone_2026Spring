@@ -67,6 +67,10 @@ void timer_init(uint64_t boot_time_base, uint64_t interval_ticks) {
 }
 
 int add_timer(timer_callback_t callback, void *arg, int sec) {
+    if (callback == (void *)0 && sec == 0) {
+        return sbi_set_timer(rdtime());
+    }
+
     if (callback == (void *)0 || sec < 0) {
         return -1;
     }

@@ -14,7 +14,7 @@ extern void relocate_and_continue(void *dtb, void (*continue_func)(void *dtb));
 // Actual kernel loading function
 // This function is called from high memory after relocation
 static void do_load_kernel(void *dtb) {
-    uart_puts("Waiting for kernel image via UART...\r\n");
+    uart_puts_boot("Waiting for kernel image via UART...\r\n");
 
     uint32_t magic = 0;
     uint32_t size = 0;
@@ -47,10 +47,10 @@ static void do_load_kernel(void *dtb) {
     const int bar_width = 50;
     int last_percent = -1;
 
-    uart_puts("[");
+    uart_puts_boot("[");
     for (int i = 0; i < bar_width; i++)
         uart_putc(' ');
-    uart_puts("] 0%");
+    uart_puts_boot("] 0%");
 
     for (uint32_t i = 0; i < size; i++) {
         kernel_mem[i] = uart_getc_raw();
@@ -70,7 +70,7 @@ static void do_load_kernel(void *dtb) {
         }
     }
 
-    uart_puts("\r\n");
+    uart_puts_boot("\r\n");
     printf("Jumping to kernel at %x (DTB: %x)\r\n", LOAD_ADDR,
            (unsigned long)dtb);
 
@@ -87,7 +87,7 @@ static void do_load_kernel(void *dtb) {
 void load_kernel(void *dtb) {
     trap_enter_loader_mode();
     uart_enter_polling_mode();
-    uart_puts("Relocating bootloader to high memory...\r\n");
+    uart_puts_boot("Relocating bootloader to high memory...\r\n");
 
     // Calculate do_load_kernel address in high memory
     void (*high_func)(void *) = HIGH_ADDR(do_load_kernel);

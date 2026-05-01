@@ -12,6 +12,7 @@ char uart_getc(void);
 char uart_getc_raw(void);
 void uart_putc(char c);
 void uart_puts(const char *s);
+void uart_puts_boot(const char *s);
 void uart_hex(unsigned long h);
 void uart_puti(int i);
 void uart_putx(unsigned long h);
