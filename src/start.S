@@ -114,7 +114,11 @@ ret_from_exception:
     csrw sstatus, s2
     ld ra,  8 *  0(sp)
     ld gp,  8 *  2(sp)
-    ld tp,  8 *  3(sp)
+    /*
+     * Keep tp as the current thread pointer across user/kernel transitions.
+     * The scheduler and syscall path use tp to find struct thread; restoring
+     * the user trap-frame tp here would clobber it before the next ecall.
+     */
     ld t0,  8 *  4(sp)
     ld t1,  8 *  5(sp)
     ld t2,  8 *  6(sp)

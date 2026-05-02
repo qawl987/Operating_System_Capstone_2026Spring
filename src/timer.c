@@ -18,7 +18,7 @@ static struct timer_event *timer_free_list;
 static struct timer_event *timer_head;
 static uint64_t g_boot_time_base;
 static uint64_t g_interval_ticks;
-static int g_periodic_log_enabled = 1;
+static int g_periodic_log_enabled = 0;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;

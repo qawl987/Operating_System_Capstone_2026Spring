@@ -1,7 +1,8 @@
 #include "helper.h"
 #include "config.h"
-#include "startup_alloc.h"
+#include "syscall.h"
 #include "task.h"
+#include "thread.h"
 #include "timer.h"
 #include "trap.h"
 #include "uart.h"
@@ -9,12 +10,12 @@
 extern void handle_exception_entry(void);
 extern void ret_from_exception(void);
 
-#define USER_STACK_SIZE 0x1000UL
 #define TIMER_INTERVAL_TICKS 20000000ULL
 #define SCAUSE_INTERRUPT_BIT (1UL << 63)
 #define SCAUSE_SUPERVISOR_TIMER 5UL
 #define SCAUSE_SUPERVISOR_EXTERNAL 9UL
 #define SCAUSE_USER_ECALL 8UL
+#define SSTATUS_SPP (1UL << 8)
 
 static uint64_t boot_hart_id;
 static uint64_t boot_time_base;
@@ -108,11 +109,15 @@ void trap_enter_loader_mode(void) {
     disable_sstatus_sie();
 }
 
-static void handle_interrupt(unsigned long cause) {
+static void handle_interrupt(unsigned long cause, struct pt_regs *regs) {
     unsigned long irq = cause & ~SCAUSE_INTERRUPT_BIT;
     if (irq == SCAUSE_SUPERVISOR_TIMER) {
         timer_handle_irq();
         timer_program_next();
+        if (regs != (void *)0 && (regs->status & SSTATUS_SPP) == 0 &&
+            get_current() != (void *)0 && get_current()->state == THREAD_RUNNING) {
+            schedule();
+        }
         return;
     }
 
@@ -129,9 +134,8 @@ static void handle_interrupt(unsigned long cause) {
 
 static void handle_exception(unsigned long cause, struct pt_regs *regs) {
     if (cause == SCAUSE_USER_ECALL) {
-        printf("sepc: 0x%x scause: 0x%x stval: 0x%x\n", regs->epc, regs->cause,
-               regs->badvaddr);
         regs->epc += 4;
+        syscall_handler(regs);
         return;
     }
 
@@ -144,7 +148,7 @@ void do_trap(struct pt_regs *regs) {
         return;
     }
     if (regs->cause & SCAUSE_INTERRUPT_BIT) {
-        handle_interrupt(regs->cause);
+        handle_interrupt(regs->cause, regs);
     } else {
         handle_exception(regs->cause, regs);
     }
@@ -173,23 +177,10 @@ void trap_init(uint64_t hart_id, uint64_t timer_tick_hz) {
 }
 
 int trap_exec_user(const void *entry, size_t size) {
-    (void)size;
-    void *user_stack = startup_alloc(USER_STACK_SIZE, USER_STACK_SIZE);
-    if (user_stack == 0) {
+    int pid = process_spawn_user(entry, (unsigned long)size);
+    if (pid < 0) {
         return -1;
     }
-
-    unsigned long current_sp = read_sp();
-    struct pt_regs *regs = (struct pt_regs *)(current_sp - sizeof(struct pt_regs));
-    for (size_t i = 0; i < sizeof(struct pt_regs) / sizeof(unsigned long); i++) {
-        ((unsigned long *)regs)[i] = 0;
-    }
-
-    regs->epc = (unsigned long)entry;
-    regs->sp = (unsigned long)user_stack + USER_STACK_SIZE;
-    regs->status = (1UL << 5);
-    write_sscratch(current_sp);
-
-    asm volatile("mv sp, %0\n\tj ret_from_exception" : : "r"(regs) : "memory");
+    process_waitpid(pid);
     return 0;
 }

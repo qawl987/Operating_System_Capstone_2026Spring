@@ -41,6 +41,23 @@ char *strncpy(char *dest, const char *src, size_t n) {
     return dest;
 }
 
+void *memcpy(void *dest, const void *src, size_t n) {
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
+    while (n-- > 0) {
+        *d++ = *s++;
+    }
+    return dest;
+}
+
+void *memset(void *s, int c, size_t n) {
+    unsigned char *p = (unsigned char *)s;
+    while (n-- > 0) {
+        *p++ = (unsigned char)c;
+    }
+    return s;
+}
+
 uint32_t bswap32(uint32_t x) {
     return ((x & 0x000000FFU) << 24) | ((x & 0x0000FF00U) << 8) |
            ((x & 0x00FF0000U) >> 8) | ((x & 0xFF000000U) >> 24);

@@ -47,6 +47,7 @@
 
 /* Common definitions */
 #define BOOT_MAGIC 0x544F4F42 /* "BOOT" in hex */
+#define USER_IMAGE_SIZE 0x01000000UL
 
 /* Linker script symbols */
 extern char _kernel_start[];

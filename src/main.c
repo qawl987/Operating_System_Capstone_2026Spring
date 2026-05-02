@@ -7,6 +7,7 @@
 #include "kmalloc.h"
 #include "sbi.h"
 #include "startup_alloc.h"
+#include "syscall.h"
 #include "task.h"
 #include "timer.h"
 #include "trap.h"
@@ -158,12 +159,9 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     uart_puts("========================================\n\n");
 
     /* Initialize memory system using startup allocator */
+    startup_add_reserved(TEST_MEM_BASE, USER_IMAGE_SIZE);
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
     thread_system_init();
-    for (int i = 0; i < 3; i++) {
-        thread_create(stage1_foo);
-    }
-    idle();
 
     uint64_t timebase = 0;
     if (fdt_get_timebase_frequency(dtb_base, &timebase) == 0) {
@@ -174,6 +172,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                (unsigned int)timebase);
     }
     trap_init(hart_id, timebase);
+    syscall_set_initrd(g_initrd_start, g_initrd_end);
 
 #define MAX_CMD_LEN 128
     char cmd_buf[MAX_CMD_LEN];
@@ -224,6 +223,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                     "  meminfo    - show memory status.\r\n"
                     "  load       - load kernel via UART.\r\n"
                     "  alloc_test - run spec test case (test_alloc_1).\r\n"
+                    "  thread_test- run Lab5 basic thread demo.\r\n"
                     "  exec [file]- run user program in initrd.\r\n"
                     "  setTimeout <sec> <msg> - delayed non-blocking print.\r\n"
                     "  task_test  - enqueue task callbacks.\r\n"
@@ -249,6 +249,11 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 load_kernel(dtb_base);
             } else if (strcmp(cmd_buf, "alloc_test") == 0) {
                 alloc_test();
+            } else if (strcmp(cmd_buf, "thread_test") == 0) {
+                for (int i = 0; i < 3; i++) {
+                    thread_create(stage1_foo);
+                }
+                schedule();
             } else if (strcmp(cmd_buf, "task_test") == 0) {
                 printf("task_test queued (run on next trap)\r\n");
                 add_task(task_test_cb, (void *)"3", 3);

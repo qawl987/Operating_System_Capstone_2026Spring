@@ -6,6 +6,7 @@
 #include "list.h"
 
 #define THREAD_STACK_SIZE 4096UL
+#define USER_STACK_SIZE 4096UL
 
 enum thread_state {
     THREAD_RUNNING = 0,
@@ -37,15 +38,26 @@ struct thread {
     struct cpu_context context;
     int pid;
     int state;
+    int exit_code;
     void *kernel_stack;
+    void *user_stack;
     void (*entry)(void);
+    struct thread *parent;
     struct list_head list;
+    struct list_head all_list;
 };
 
 void thread_system_init(void);
 struct thread *thread_create(void (*func)(void));
 void schedule(void);
 void thread_exit(void);
+void process_exit(int status);
+long process_waitpid(long pid);
+int process_stop(long pid);
+long process_fork(struct trap_frame *regs);
+int process_exec_image(const void *image, unsigned long size);
+int process_spawn_user(const void *image, unsigned long size);
+struct thread *thread_find(int pid);
 void kill_zombies(void);
 void idle(void);
 
