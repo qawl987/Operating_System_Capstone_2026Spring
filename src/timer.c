@@ -20,6 +20,7 @@ static uint64_t g_boot_time_base;
 static uint64_t g_tick_hz;
 static uint64_t g_interval_ticks;
 static int g_periodic_log_enabled = 0;
+static int g_periodic_log_armed;
 
 static inline uint64_t rdtime(void) {
     uint64_t t;
@@ -41,8 +42,34 @@ static void timer_free_node(struct timer_event *n) {
     timer_free_list = n;
 }
 
+static void periodic_tick_cb(void *arg) {
+    (void)arg;
+    if (!g_periodic_log_armed) {
+        return;
+    }
+    if (g_periodic_log_enabled) {
+        printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
+    }
+    if (add_timer(periodic_tick_cb, (void *)0, 2) < 0) {
+        g_periodic_log_armed = 0;
+        printf("[Timer] failed to schedule periodic tick\n");
+    }
+}
+
 void timer_set_periodic_log_enabled(int enabled) {
     g_periodic_log_enabled = (enabled != 0);
+}
+
+void timer_start_periodic_log(void) {
+    g_periodic_log_enabled = 1;
+    if (g_periodic_log_armed) {
+        return;
+    }
+    g_periodic_log_armed = 1;
+    if (add_timer(periodic_tick_cb, (void *)0, 2) < 0) {
+        g_periodic_log_armed = 0;
+        printf("[Timer] failed to schedule periodic tick\n");
+    }
 }
 
 void timer_init(uint64_t boot_time_base, uint64_t tick_hz) {
@@ -58,6 +85,7 @@ void timer_init(uint64_t boot_time_base, uint64_t tick_hz) {
     }
     timer_pool[TIMER_LIST_MAX - 1].next = (void *)0;
     timer_head = (void *)0;
+    g_periodic_log_armed = 0;
 }
 
 int add_timer(timer_callback_t callback, void *arg, int sec) {

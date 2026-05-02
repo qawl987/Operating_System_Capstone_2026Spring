@@ -272,7 +272,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
                 timer_set_periodic_log_enabled(0);
                 printf("timer periodic log: OFF\r\n");
             } else if (strcmp(cmd_buf, "open_timer") == 0) {
-                timer_set_periodic_log_enabled(1);
+                timer_start_periodic_log();
                 printf("timer periodic log: ON\r\n");
             } else if (strcmp(cmd_buf, "adv2_test") == 0) {
                 printf("adv2_test queued\r\n");
