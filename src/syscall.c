@@ -16,6 +16,9 @@ enum {
     SYS_STOP = 7,
     SYS_DISPLAY = 8,
     SYS_USLEEP = 9,
+    SYS_SIGNAL = 10,
+    SYS_SIGRETURN = 11,
+    SYS_KILL = 12,
 };
 
 static unsigned long initrd_start;
@@ -103,10 +106,20 @@ void syscall_handler(struct pt_regs *regs) {
     case SYS_USLEEP:
         ret = process_usleep((unsigned int)regs->a0);
         break;
+    case SYS_SIGNAL:
+        ret = process_signal((int)regs->a0, (void (*)(void))regs->a1);
+        break;
+    case SYS_SIGRETURN:
+        process_sigreturn((struct trap_frame *)regs);
+        return;
+    case SYS_KILL:
+        ret = process_kill((int)regs->a0, (int)regs->a1);
+        break;
     default:
         ret = -1;
         break;
     }
 
     regs->a0 = (unsigned long)ret;
+    check_pending_signals((struct trap_frame *)regs);
 }

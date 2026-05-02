@@ -14,10 +14,12 @@ static struct thread *idle_thread;
 static int next_pid = 1;
 
 #define TF_SP 1
+#define TF_RA 0
 #define TF_A0 9
 #define TF_EPC 31
 #define TF_STATUS 32
 #define USER_IMAGE_BASE TEST_MEM_BASE
+#define SIGNAL_TRAMPOLINE_SIZE 16UL
 
 static struct thread *alloc_thread(void (*func)(void)) {
     struct thread *t = (struct thread *)allocate(sizeof(struct thread));
@@ -55,6 +57,7 @@ static void free_thread(struct thread *t) {
     if (t == (void *)0 || t == idle_thread || t == get_current()) {
         return;
     }
+    printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
     list_del_init(&t->all_list);
     if (!list_empty(&t->list)) {
         list_del_init(&t->list);
@@ -64,6 +67,9 @@ static void free_thread(struct thread *t) {
     }
     if (t->user_stack != (void *)0) {
         free(t->user_stack);
+    }
+    if (t->signal_stack != (void *)0) {
+        free(t->signal_stack);
     }
     free(t);
 }
@@ -203,11 +209,107 @@ int process_stop(long pid) {
         return 0;
     }
     target->state = THREAD_ZOMBIE;
-    if (!list_empty(&target->list)) {
-        list_del_init(&target->list);
-    }
-    list_add_tail(&target->list, &zombie_queue);
+    target->parent = (void *)0;
+    free_thread(target);
     return 0;
+}
+
+long process_signal(int signum, void (*handler)(void)) {
+    struct thread *cur = get_current();
+    if (cur == (void *)0 || signum < 0 || signum >= SIGNAL_MAX) {
+        return -1;
+    }
+    void (*old)(void) = cur->signal_handlers[signum];
+    cur->signal_handlers[signum] = handler;
+    return (long)old;
+}
+
+void process_sigreturn(struct trap_frame *regs) {
+    struct thread *cur = get_current();
+    if (cur == (void *)0 || regs == (void *)0 || !cur->processing_signal) {
+        return;
+    }
+
+    printf("[INFO] SIGRETURN is called!\n");
+    void *stack = cur->signal_stack;
+    memcpy(regs, &cur->backup_trap_frame, sizeof(*regs));
+    cur->processing_signal = 0;
+    cur->signal_stack = (void *)0;
+    if (stack != (void *)0) {
+        free(stack);
+    }
+}
+
+long process_kill(int pid, int signum) {
+    if (signum < 0 || signum >= SIGNAL_MAX) {
+        return -1;
+    }
+    struct thread *target = thread_find(pid);
+    if (target == (void *)0 || target == idle_thread ||
+        target->state == THREAD_ZOMBIE) {
+        return -1;
+    }
+    if (target->signal_handlers[signum] == (void *)0) {
+        return process_stop(pid);
+    }
+
+    target->pending_signals |= (1U << signum);
+    if (target->state == THREAD_SLEEPING) {
+        target->state = THREAD_RUNNING;
+        target->wake_time = 0;
+        if (list_empty(&target->list)) {
+            list_add_tail(&target->list, &run_queue);
+        }
+    }
+    return 0;
+}
+
+void check_pending_signals(struct trap_frame *regs) {
+    struct thread *cur = get_current();
+    if (cur == (void *)0 || regs == (void *)0 ||
+        cur->state != THREAD_RUNNING || cur->processing_signal ||
+        cur->pending_signals == 0) {
+        return;
+    }
+
+    int signum = -1;
+    for (int i = 0; i < SIGNAL_MAX; i++) {
+        if ((cur->pending_signals & (1U << i)) != 0) {
+            signum = i;
+            break;
+        }
+    }
+    if (signum < 0) {
+        return;
+    }
+
+    void (*handler)(void) = cur->signal_handlers[signum];
+    cur->pending_signals &= ~(1U << signum);
+    if (handler == (void *)0) {
+        process_exit(0);
+        return;
+    }
+
+    void *stack = allocate(USER_STACK_SIZE);
+    if (stack == (void *)0) {
+        cur->pending_signals |= (1U << signum);
+        return;
+    }
+
+    memcpy(&cur->backup_trap_frame, regs, sizeof(*regs));
+    uint64_t tramp = ((uint64_t)stack + USER_STACK_SIZE -
+                      SIGNAL_TRAMPOLINE_SIZE) &
+                     ~0xFUL;
+    uint32_t *code = (uint32_t *)tramp;
+    code[0] = 0x00b00893U;
+    code[1] = 0x00000073U;
+    asm volatile(".word 0x0000100f" ::: "memory");
+
+    cur->signal_stack = stack;
+    cur->processing_signal = 1;
+    regs->x[TF_EPC] = (uint64_t)handler;
+    regs->x[TF_SP] = tramp;
+    regs->x[TF_RA] = tramp;
 }
 
 static uint64_t rdtime(void) {
@@ -285,6 +387,9 @@ long process_fork(struct trap_frame *regs) {
     child->state = THREAD_RUNNING;
     child->exit_code = 0;
     child->wake_time = 0;
+    child->pending_signals = 0;
+    child->processing_signal = 0;
+    child->signal_stack = (void *)0;
     child->kernel_stack = kstack;
     child->user_stack = ustack;
     child->parent = parent;
@@ -326,6 +431,12 @@ int process_exec_image(const void *image, unsigned long size) {
                                                     THREAD_STACK_SIZE -
                                                     sizeof(struct trap_frame));
     memset(regs, 0, sizeof(*regs));
+    cur->pending_signals = 0;
+    cur->processing_signal = 0;
+    if (cur->signal_stack != (void *)0) {
+        free(cur->signal_stack);
+        cur->signal_stack = (void *)0;
+    }
     regs->x[TF_EPC] = USER_IMAGE_BASE;
     regs->x[TF_SP] = (uint64_t)cur->user_stack + USER_STACK_SIZE;
     regs->x[TF_STATUS] = (1UL << 5);

@@ -7,6 +7,7 @@
 
 #define THREAD_STACK_SIZE 4096UL
 #define USER_STACK_SIZE 4096UL
+#define SIGNAL_MAX 32
 
 enum thread_state {
     THREAD_RUNNING = 0,
@@ -41,6 +42,11 @@ struct thread {
     int state;
     int exit_code;
     uint64_t wake_time;
+    void (*signal_handlers[SIGNAL_MAX])(void);
+    uint32_t pending_signals;
+    struct trap_frame backup_trap_frame;
+    void *signal_stack;
+    int processing_signal;
     void *kernel_stack;
     void *user_stack;
     void (*entry)(void);
@@ -57,6 +63,10 @@ void process_exit(int status);
 long process_waitpid(long pid);
 int process_stop(long pid);
 long process_usleep(unsigned int usec);
+long process_signal(int signum, void (*handler)(void));
+void process_sigreturn(struct trap_frame *regs);
+long process_kill(int pid, int signum);
+void check_pending_signals(struct trap_frame *regs);
 long process_fork(struct trap_frame *regs);
 int process_exec_image(const void *image, unsigned long size);
 int process_spawn_user(const void *image, unsigned long size);

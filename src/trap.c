@@ -155,6 +155,9 @@ void do_trap(struct pt_regs *regs) {
         handle_exception(regs->cause, regs);
     }
     task_run_pending();
+    if ((regs->status & SSTATUS_SPP) == 0) {
+        check_pending_signals((struct trap_frame *)regs);
+    }
 }
 
 void trap_init(uint64_t hart_id, uint64_t tick_hz) {
