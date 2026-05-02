@@ -57,7 +57,6 @@ static void free_thread(struct thread *t) {
     if (t == (void *)0 || t == idle_thread || t == get_current()) {
         return;
     }
-    printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
     list_del_init(&t->all_list);
     if (!list_empty(&t->list)) {
         list_del_init(&t->list);
@@ -184,6 +183,7 @@ long process_waitpid(long pid) {
             }
             if (t->state == THREAD_ZOMBIE) {
                 long ret = t->pid;
+                printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
                 free_thread(t);
                 return ret;
             }
@@ -210,7 +210,11 @@ int process_stop(long pid) {
     }
     target->state = THREAD_ZOMBIE;
     target->parent = (void *)0;
-    free_thread(target);
+    printf("[INFO] Killing zombie thread with PID: %d\n", target->pid);
+    if (!list_empty(&target->list)) {
+        list_del_init(&target->list);
+    }
+    list_add_tail(&target->list, &zombie_queue);
     return 0;
 }
 
@@ -485,6 +489,9 @@ void kill_zombies(void) {
         if (t->parent != (void *)0 && t->parent->state != THREAD_ZOMBIE) {
             list_add_tail(&t->list, &zombie_queue);
             continue;
+        }
+        if (t->parent != (void *)0) {
+            printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
         }
         free_thread(t);
     }
