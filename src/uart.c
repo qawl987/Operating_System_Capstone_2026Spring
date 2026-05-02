@@ -1,3 +1,5 @@
+#include "thread.h"
+
 #ifdef PLATFORM_PI
 // Orange Pi RV2: PXA UART, reg-shift=2, reg-io-width=4
 #define UART_BASE 0xD4017000UL
@@ -80,6 +82,8 @@ static inline unsigned int next_idx(unsigned int idx) {
     return (idx + 1U) % UART_BUF_SIZE;
 }
 
+int uart_try_getc(char *out);
+
 void uart_enable_rx_interrupt(void) { *uart_ier() |= IER_RX_ENABLE; }
 
 void uart_enable_tx_interrupt(void) { *uart_ier() |= IER_TX_ENABLE; }
@@ -137,18 +141,34 @@ void uart_handle_irq(void) {
 
 char uart_getc() {
     while (1) {
-        unsigned long irq_state = irq_save();
-        if (rx_r != rx_w) {
-            char c = rx_buf[rx_r];
-            rx_r = next_idx(rx_r);
-            irq_restore(irq_state);
-            return c == '\r' ? '\n' : c;
+        char c;
+        if (uart_try_getc(&c) == 0) {
+            return c;
         }
-        irq_restore(irq_state);
         if ((*uart_lsr() & LSR_DR) != 0) {
             uart_handle_irq();
         }
+        schedule();
     }
+}
+
+int uart_try_getc(char *out) {
+    if (out == (void *)0) {
+        return -1;
+    }
+    if ((*uart_lsr() & LSR_DR) != 0) {
+        uart_handle_irq();
+    }
+    unsigned long irq_state = irq_save();
+    if (rx_r == rx_w) {
+        irq_restore(irq_state);
+        return -1;
+    }
+    char c = rx_buf[rx_r];
+    rx_r = next_idx(rx_r);
+    irq_restore(irq_state);
+    *out = c == '\r' ? '\n' : c;
+    return 0;
 }
 
 // Raw version without CR->LF conversion (for binary data)
@@ -190,6 +210,8 @@ void uart_putc(char c) {
         irq_restore(irq_state);
         if ((*uart_lsr() & LSR_TDRQ) != 0) {
             uart_handle_irq();
+        } else if (get_current() != (void *)0) {
+            schedule();
         }
     }
 }

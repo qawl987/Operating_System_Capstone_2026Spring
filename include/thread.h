@@ -11,6 +11,7 @@
 enum thread_state {
     THREAD_RUNNING = 0,
     THREAD_ZOMBIE = 1,
+    THREAD_SLEEPING = 2,
 };
 
 struct cpu_context {
@@ -39,6 +40,7 @@ struct thread {
     int pid;
     int state;
     int exit_code;
+    uint64_t wake_time;
     void *kernel_stack;
     void *user_stack;
     void (*entry)(void);
@@ -54,10 +56,12 @@ void thread_exit(void);
 void process_exit(int status);
 long process_waitpid(long pid);
 int process_stop(long pid);
+long process_usleep(unsigned int usec);
 long process_fork(struct trap_frame *regs);
 int process_exec_image(const void *image, unsigned long size);
 int process_spawn_user(const void *image, unsigned long size);
 struct thread *thread_find(int pid);
+void thread_wake_sleepers(uint64_t now);
 void kill_zombies(void);
 void idle(void);
 

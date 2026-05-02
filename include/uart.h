@@ -9,6 +9,7 @@ void uart_handle_irq(void);
 int uart_rx_overflow_count(void);
 void uart_enter_polling_mode(void);
 char uart_getc(void);
+int uart_try_getc(char *out);
 char uart_getc_raw(void);
 void uart_putc(char c);
 void uart_puts(const char *s);

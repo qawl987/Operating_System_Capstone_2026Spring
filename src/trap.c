@@ -19,6 +19,7 @@ extern void ret_from_exception(void);
 
 static uint64_t boot_hart_id;
 static uint64_t boot_time_base;
+static uint64_t timer_tick_hz = TIMER_TICK_HZ;
 static uint64_t timer_interval_ticks = TIMER_INTERVAL_TICKS;
 static int loader_mode;
 
@@ -101,7 +102,7 @@ uint64_t trap_uptime_seconds(void) {
     if (now < boot_time_base) {
         return 0;
     }
-    return (now - boot_time_base) / (timer_interval_ticks / 2);
+    return (now - boot_time_base) / timer_tick_hz;
 }
 
 void trap_enter_loader_mode(void) {
@@ -112,6 +113,7 @@ void trap_enter_loader_mode(void) {
 static void handle_interrupt(unsigned long cause, struct pt_regs *regs) {
     unsigned long irq = cause & ~SCAUSE_INTERRUPT_BIT;
     if (irq == SCAUSE_SUPERVISOR_TIMER) {
+        thread_wake_sleepers(rdtime());
         timer_handle_irq();
         timer_program_next();
         if (regs != (void *)0 && (regs->status & SSTATUS_SPP) == 0 &&
@@ -155,20 +157,24 @@ void do_trap(struct pt_regs *regs) {
     task_run_pending();
 }
 
-void trap_init(uint64_t hart_id, uint64_t timer_tick_hz) {
+void trap_init(uint64_t hart_id, uint64_t tick_hz) {
     loader_mode = 0;
     boot_hart_id = hart_id;
     boot_time_base = rdtime();
-    if (timer_tick_hz > 0) {
-        timer_interval_ticks = timer_tick_hz * 2ULL;
+    if (tick_hz > 0) {
+        timer_tick_hz = tick_hz;
     } else {
-        timer_interval_ticks = TIMER_TICK_HZ * 2ULL;
+        timer_tick_hz = TIMER_TICK_HZ;
+    }
+    timer_interval_ticks = timer_tick_hz / 32ULL;
+    if (timer_interval_ticks == 0) {
+        timer_interval_ticks = 1;
     }
     write_stvec((void *)handle_exception_entry);
     write_sscratch(read_sp());
     plic_init();
     task_init();
-    timer_init(boot_time_base, timer_interval_ticks);
+    timer_init(boot_time_base, timer_tick_hz);
     uart_enable_rx_interrupt();
     enable_sie_stie();
     enable_sie_seie();

@@ -27,6 +27,7 @@
 /* Test memory region (safe area not overlapping with kernel/DTB) */
 #define TEST_MEM_BASE 0x90000000UL
 #define TEST_MEM_SIZE 0x10000000UL /* 256MB */
+#define FRAMEBUFFER_BASE 0x87000000UL
 #else
 /* Orange Pi RV2 addresses */
 #define LOAD_ADDR 0x00200000ULL
@@ -43,11 +44,16 @@
 /* Test memory region (safe area not overlapping with kernel/DTB) */
 #define TEST_MEM_BASE 0x40000000UL
 #define TEST_MEM_SIZE 0x10000000UL /* 256MB */
+#define FRAMEBUFFER_BASE 0x7f700000UL
 #endif
 
 /* Common definitions */
 #define BOOT_MAGIC 0x544F4F42 /* "BOOT" in hex */
 #define USER_IMAGE_SIZE 0x01000000UL
+#define FRAMEBUFFER_WIDTH 1920UL
+#define FRAMEBUFFER_HEIGHT 1080UL
+#define FRAMEBUFFER_BPP 4UL
+#define FRAMEBUFFER_SIZE (FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * FRAMEBUFFER_BPP)
 
 /* Linker script symbols */
 extern char _kernel_start[];

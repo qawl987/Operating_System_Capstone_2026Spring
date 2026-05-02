@@ -2,6 +2,7 @@
 #include "buddy.h"
 #include "config.h"
 #include "dtbParser.h"
+#include "framebuffer.h"
 #include "helper.h"
 #include "initrd.h"
 #include "kmalloc.h"
@@ -160,8 +161,12 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
 
     /* Initialize memory system using startup allocator */
     startup_add_reserved(TEST_MEM_BASE, USER_IMAGE_SIZE);
+    startup_add_reserved(FRAMEBUFFER_BASE, FRAMEBUFFER_SIZE);
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
     thread_system_init();
+    if (framebuffer_init() < 0) {
+        printf("framebuffer: init failed\r\n");
+    }
 
     uint64_t timebase = 0;
     if (fdt_get_timebase_frequency(dtb_base, &timebase) == 0) {

@@ -8,7 +8,7 @@ TARGET = kernel
 
 # Source files
 SRC_DIR = src
-SRCS_C = $(SRC_DIR)/main.c $(SRC_DIR)/uart.c $(SRC_DIR)/bootloader.c $(SRC_DIR)/dtbParser.c $(SRC_DIR)/helper.c $(SRC_DIR)/initrd.c $(SRC_DIR)/sbi.c $(SRC_DIR)/buddy.c $(SRC_DIR)/kmalloc.c $(SRC_DIR)/startup_alloc.c $(SRC_DIR)/trap.c $(SRC_DIR)/timer.c $(SRC_DIR)/task.c $(SRC_DIR)/thread.c $(SRC_DIR)/syscall.c
+SRCS_C = $(SRC_DIR)/main.c $(SRC_DIR)/uart.c $(SRC_DIR)/bootloader.c $(SRC_DIR)/dtbParser.c $(SRC_DIR)/helper.c $(SRC_DIR)/initrd.c $(SRC_DIR)/sbi.c $(SRC_DIR)/buddy.c $(SRC_DIR)/kmalloc.c $(SRC_DIR)/startup_alloc.c $(SRC_DIR)/trap.c $(SRC_DIR)/timer.c $(SRC_DIR)/task.c $(SRC_DIR)/thread.c $(SRC_DIR)/syscall.c $(SRC_DIR)/framebuffer.c
 SRCS_S = $(SRC_DIR)/start.S $(SRC_DIR)/switch.S
 
 build: clean
@@ -27,6 +27,9 @@ run: build
 
 run_initrd: build
 	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -initrd initramfs.cpio -display none -serial stdio
+
+run_initrd_vnc: build
+	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -initrd initramfs.cpio -serial stdio -device ramfb -display vnc=:1
 
 run_pty: build
 	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -display none -serial pty

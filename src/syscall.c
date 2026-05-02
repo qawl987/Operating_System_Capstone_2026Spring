@@ -1,5 +1,6 @@
 #include "syscall.h"
 
+#include "framebuffer.h"
 #include "initrd.h"
 #include "thread.h"
 #include "uart.h"
@@ -13,6 +14,8 @@ enum {
     SYS_WAITPID = 5,
     SYS_EXIT = 6,
     SYS_STOP = 7,
+    SYS_DISPLAY = 8,
+    SYS_USLEEP = 9,
 };
 
 static unsigned long initrd_start;
@@ -28,7 +31,9 @@ static long sys_uart_read(char *buf, long count) {
         return -1;
     }
     for (long i = 0; i < count; i++) {
-        buf[i] = uart_getc();
+        while (uart_try_getc(&buf[i]) < 0) {
+            schedule();
+        }
     }
     return count;
 }
@@ -62,6 +67,8 @@ void syscall_handler(struct pt_regs *regs) {
         return;
     }
 
+    asm volatile("csrsi sstatus, 2");
+
     switch (regs->a7) {
     case SYS_GETPID:
         ret = get_current()->pid;
@@ -87,6 +94,14 @@ void syscall_handler(struct pt_regs *regs) {
         break;
     case SYS_STOP:
         ret = process_stop((long)regs->a0);
+        break;
+    case SYS_DISPLAY:
+        ret = framebuffer_display((const unsigned int *)regs->a0,
+                                  (unsigned int)regs->a1,
+                                  (unsigned int)regs->a2);
+        break;
+    case SYS_USLEEP:
+        ret = process_usleep((unsigned int)regs->a0);
         break;
     default:
         ret = -1;

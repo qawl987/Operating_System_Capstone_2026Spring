@@ -17,6 +17,7 @@ static struct timer_event timer_pool[TIMER_LIST_MAX];
 static struct timer_event *timer_free_list;
 static struct timer_event *timer_head;
 static uint64_t g_boot_time_base;
+static uint64_t g_tick_hz;
 static uint64_t g_interval_ticks;
 static int g_periodic_log_enabled = 0;
 
@@ -40,30 +41,23 @@ static void timer_free_node(struct timer_event *n) {
     timer_free_list = n;
 }
 
-static void periodic_tick_cb(void *arg) {
-    (void)arg;
-    if (g_periodic_log_enabled) {
-        printf("[Timer] %d seconds after boot\n", (int)trap_uptime_seconds());
-    }
-    if (add_timer(periodic_tick_cb, (void *)0, 2) < 0) {
-        printf("[Timer] failed to schedule periodic tick\n");
-    }
-}
-
 void timer_set_periodic_log_enabled(int enabled) {
     g_periodic_log_enabled = (enabled != 0);
 }
 
-void timer_init(uint64_t boot_time_base, uint64_t interval_ticks) {
+void timer_init(uint64_t boot_time_base, uint64_t tick_hz) {
     g_boot_time_base = boot_time_base;
-    g_interval_ticks = interval_ticks;
+    g_tick_hz = tick_hz;
+    g_interval_ticks = tick_hz / 32ULL;
+    if (g_interval_ticks == 0) {
+        g_interval_ticks = 1;
+    }
     timer_free_list = &timer_pool[0];
     for (int i = 0; i < TIMER_LIST_MAX - 1; i++) {
         timer_pool[i].next = &timer_pool[i + 1];
     }
     timer_pool[TIMER_LIST_MAX - 1].next = (void *)0;
     timer_head = (void *)0;
-    add_timer(periodic_tick_cb, (void *)0, 2);
 }
 
 int add_timer(timer_callback_t callback, void *arg, int sec) {
@@ -81,7 +75,7 @@ int add_timer(timer_callback_t callback, void *arg, int sec) {
     }
 
     uint64_t now = rdtime();
-    uint64_t delay_ticks = (uint64_t)sec * g_interval_ticks / 2;
+    uint64_t delay_ticks = (uint64_t)sec * g_tick_hz;
     n->expires_at = now + delay_ticks;
     n->callback = callback;
     n->arg = arg;
@@ -119,18 +113,22 @@ void timer_handle_irq(void) {
 }
 
 void timer_program_next(void) {
+    uint64_t now = rdtime();
+    uint64_t target = now + g_interval_ticks;
     if (timer_head != (void *)0) {
-        long err = sbi_set_timer(timer_head->expires_at);
+        if (timer_head->expires_at < target) {
+            target = timer_head->expires_at;
+        }
+        long err = sbi_set_timer(target);
         if (err) {
             printf("[Timer] sbi_set_timer err=%d target=0x%x\n", (int)err,
-                   (unsigned long)timer_head->expires_at);
+                   (unsigned long)target);
         }
         return;
     }
-    uint64_t now = rdtime();
-    long err = sbi_set_timer(now + g_interval_ticks);
+    long err = sbi_set_timer(target);
     if (err) {
         printf("[Timer] sbi_set_timer err=%d target=0x%x\n", (int)err,
-               (unsigned long)(now + g_interval_ticks));
+               (unsigned long)target);
     }
 }

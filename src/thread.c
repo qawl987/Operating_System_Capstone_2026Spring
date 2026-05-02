@@ -35,6 +35,7 @@ static struct thread *alloc_thread(void (*func)(void)) {
     t->pid = next_pid++;
     t->state = THREAD_RUNNING;
     t->exit_code = 0;
+    t->wake_time = 0;
     t->kernel_stack = stack;
     t->user_stack = (void *)0;
     t->entry = func;
@@ -91,6 +92,7 @@ void thread_system_init(void) {
     boot->pid = next_pid++;
     boot->state = THREAD_RUNNING;
     boot->exit_code = 0;
+    boot->wake_time = 0;
     boot->kernel_stack = (void *)0;
     boot->user_stack = (void *)0;
     boot->entry = (void *)0;
@@ -208,6 +210,46 @@ int process_stop(long pid) {
     return 0;
 }
 
+static uint64_t rdtime(void) {
+    uint64_t t;
+    asm volatile("rdtime %0" : "=r"(t));
+    return t;
+}
+
+long process_usleep(unsigned int usec) {
+    struct thread *cur = get_current();
+    if (cur == (void *)0) {
+        return -1;
+    }
+    if (usec == 0) {
+        schedule();
+        return 0;
+    }
+
+    uint64_t delay = ((uint64_t)usec * TIMER_TICK_HZ) / 1000000ULL;
+    if (delay == 0) {
+        delay = 1;
+    }
+    cur->wake_time = rdtime() + delay;
+    cur->state = THREAD_SLEEPING;
+    schedule();
+    return 0;
+}
+
+void thread_wake_sleepers(uint64_t now) {
+    struct list_head *pos = (void *)0;
+    list_for_each(pos, &all_threads) {
+        struct thread *t = list_entry(pos, struct thread, all_list);
+        if (t->state == THREAD_SLEEPING && now >= t->wake_time) {
+            t->state = THREAD_RUNNING;
+            t->wake_time = 0;
+            if (list_empty(&t->list)) {
+                list_add_tail(&t->list, &run_queue);
+            }
+        }
+    }
+}
+
 long process_fork(struct trap_frame *regs) {
     struct thread *parent = get_current();
     if (parent == (void *)0 || parent->kernel_stack == (void *)0 ||
@@ -242,6 +284,7 @@ long process_fork(struct trap_frame *regs) {
     child->pid = next_pid++;
     child->state = THREAD_RUNNING;
     child->exit_code = 0;
+    child->wake_time = 0;
     child->kernel_stack = kstack;
     child->user_stack = ustack;
     child->parent = parent;
