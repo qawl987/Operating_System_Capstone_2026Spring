@@ -1,6 +1,7 @@
 #include "thread.h"
 
 #include "config.h"
+#include "framebuffer.h"
 #include "helper.h"
 #include "kmalloc.h"
 #include "uart.h"
@@ -80,6 +81,7 @@ static void free_thread(struct thread *t) {
         list_del_init(&t->list);
     }
     irq_restore(irq_state);
+    framebuffer_release_owner(t->pid);
     if (t->kernel_stack != (void *)0) {
         free(t->kernel_stack);
     }
@@ -192,6 +194,7 @@ void process_exit(int status) {
     }
     cur->exit_code = status;
     cur->state = THREAD_ZOMBIE;
+    framebuffer_release_owner(cur->pid);
     schedule();
     while (1) {
         asm volatile("wfi");
@@ -238,6 +241,7 @@ int process_stop(long pid) {
     }
     target->state = THREAD_ZOMBIE;
     target->parent = (void *)0;
+    framebuffer_release_owner(target->pid);
     printf("[INFO] Killing zombie thread with PID: %d\n", target->pid);
     unsigned long irq_state = irq_save();
     if (!list_empty(&target->list)) {
