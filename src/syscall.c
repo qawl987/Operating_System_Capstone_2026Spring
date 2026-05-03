@@ -114,6 +114,9 @@ void syscall_handler(struct pt_regs *regs) {
         return;
     case SYS_KILL:
         ret = process_kill((int)regs->a0, (int)regs->a1);
+        if (ret == 0) {
+            schedule();
+        }
         break;
     default:
         ret = -1;

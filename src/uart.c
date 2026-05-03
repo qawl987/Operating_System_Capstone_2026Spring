@@ -217,10 +217,9 @@ void uart_putc(char c) {
 }
 
 void uart_puts(const char *s) {
-    unsigned long irq_state = irq_save();
-    while (*s)
+    while (*s) {
         uart_putc(*s++);
-    irq_restore(irq_state);
+    }
 }
 
 void uart_puts_boot(const char *s) {

@@ -106,7 +106,10 @@ ret_from_exception:
     bnez s0, 1f
     addi s0, sp, 8 * 35
     csrw sscratch, s0
+    j 2f
 1:
+    csrw sscratch, zero
+2:
     /* Restore context */
     ld s1,  8 * 31(sp)
     ld s2,  8 * 32(sp)

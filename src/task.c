@@ -122,15 +122,25 @@ void task_run_pending(void) {
             return;
         }
         task_head = n->next;
+
+        int priority = n->priority;
+        task_callback_t callback = n->callback;
+        void *arg = n->arg;
         task_free_node(n);
 
         int prev_priority = task_current_priority;
-        task_current_priority = n->priority;
+        task_current_priority = priority;
+        unsigned long sstatus;
+        asm volatile("csrr %0, sstatus" : "=r"(sstatus));
         asm volatile("csrsi sstatus, 2");
-        if (n->callback) {
-            n->callback(n->arg);
+        if (callback) {
+            callback(arg);
         }
-        asm volatile("csrci sstatus, 2");
+        if (sstatus & 2UL) {
+            asm volatile("csrsi sstatus, 2");
+        } else {
+            asm volatile("csrci sstatus, 2");
+        }
         task_current_priority = prev_priority;
     }
 }

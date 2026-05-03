@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "helper.h"
+#include "thread.h"
 
 #define XRGB8888 875713112U
 #define QEMU_PACKED __attribute__((packed))
@@ -136,9 +137,17 @@ int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
     unsigned int start_x = (FRAMEBUFFER_WIDTH - width) / 2;
     unsigned int start_y = (FRAMEBUFFER_HEIGHT - height) / 2;
     for (unsigned int y = 0; y < height; y++) {
+        if (get_current() != (void *)0 &&
+            get_current()->state != THREAD_RUNNING) {
+            return -1;
+        }
         unsigned int *dst = fb + (start_y + y) * FRAMEBUFFER_WIDTH + start_x;
         memcpy(dst, bmp_image + y * width, width * sizeof(unsigned int));
         flush_dcache(dst, width * sizeof(unsigned int));
+        if ((y & 0x0fU) == 0 && get_current() != (void *)0 &&
+            get_current()->state == THREAD_RUNNING) {
+            schedule();
+        }
     }
     return 0;
 }
