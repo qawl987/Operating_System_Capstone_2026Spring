@@ -1,0 +1,64 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+/*
+ * Log Level Configuration
+ * Change this to control verbosity during demo:
+ * - LOG_LEVEL_NONE  (0): No logs
+ * - LOG_LEVEL_SPEC  (1): Only spec-required logs (for demo)
+ * - LOG_LEVEL_INFO  (2): Spec + initialization info
+ * - LOG_LEVEL_DEBUG (3): All logs (default)
+ */
+#define LOG_LEVEL 0 /* Set to 1 for demo, 3 for development */
+
+#ifdef PLATFORM_QEMU
+/* QEMU virt machine addresses */
+#define LOAD_ADDR 0x80200000ULL
+#define RELOC_ADDR 0x84000000ULL
+#define PLIC_BASE 0x0C000000UL
+#define PLIC_S_ENABLE_BASE 0x2080UL
+#define PLIC_S_THRESHOLD_BASE 0x201000UL
+#define PLIC_S_CLAIM_BASE 0x201004UL
+#define UART0_IRQ_ID 10U
+#define TIMER_TICK_HZ 10000000ULL
+/* Default memory region for QEMU (from DTB, fallback values) */
+#define DEFAULT_MEM_BASE 0x80000000UL
+#define DEFAULT_MEM_SIZE 0x80000000UL /* 2GB */
+/* Test memory region (safe area not overlapping with kernel/DTB) */
+#define TEST_MEM_BASE 0x90000000UL
+#define TEST_MEM_SIZE 0x10000000UL /* 256MB */
+#define FRAMEBUFFER_BASE 0x87000000UL
+#else
+/* Orange Pi RV2 addresses */
+#define LOAD_ADDR 0x00200000ULL
+#define RELOC_ADDR 0x20000000ULL
+#define PLIC_BASE 0xE0000000UL
+#define PLIC_S_ENABLE_BASE 0x2080UL
+#define PLIC_S_THRESHOLD_BASE 0x201000UL
+#define PLIC_S_CLAIM_BASE 0x201004UL
+#define UART0_IRQ_ID 42U
+#define TIMER_TICK_HZ 24000000ULL
+/* Default memory region for OrangePi RV2 (from DTB, fallback values) */
+#define DEFAULT_MEM_BASE 0x00000000UL
+#define DEFAULT_MEM_SIZE 0x80000000UL /* 2GB (first memory region) */
+/* Test memory region (safe area not overlapping with kernel/DTB) */
+#define TEST_MEM_BASE 0x40000000UL
+#define TEST_MEM_SIZE 0x10000000UL /* 256MB */
+#define FRAMEBUFFER_BASE 0x7f700000UL
+#endif
+
+/* Common definitions */
+#define BOOT_MAGIC 0x544F4F42 /* "BOOT" in hex */
+#define USER_IMAGE_SIZE 0x01000000UL
+#define FRAMEBUFFER_WIDTH 1920UL
+#define FRAMEBUFFER_HEIGHT 1080UL
+#define FRAMEBUFFER_BPP 4UL
+#define FRAMEBUFFER_SIZE (FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * FRAMEBUFFER_BPP)
+
+/* Linker script symbols */
+extern char _kernel_start[];
+extern char _kernel_end[];
+extern char _load_start[];
+extern char _load_end[];
+
+#endif /* CONFIG_H */
