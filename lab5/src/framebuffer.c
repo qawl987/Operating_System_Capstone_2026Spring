@@ -16,6 +16,8 @@ struct QEMU_PACKED ramfb_cfg {
     uint32_t stride;
 };
 
+static int display_owner_pid;
+
 #ifdef PLATFORM_QEMU
 #define FW_CFG_BASE 0x10100000UL
 #define FW_CFG_DMA_CTL_ERROR 0x01U
@@ -108,6 +110,7 @@ static void flush_dcache(void *addr, unsigned long len) {
 #endif
 
 int framebuffer_init(void) {
+    display_owner_pid = 0;
 #ifdef PLATFORM_QEMU
     int ramfb = fw_cfg_find_file("etc/ramfb");
     if (ramfb < 0) {
@@ -133,21 +136,29 @@ int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
         return -1;
     }
 
+    struct thread *cur = get_current();
+    int pid = cur != (void *)0 ? cur->pid : 0;
+    if (pid != 0) {
+        if (display_owner_pid == 0) {
+            display_owner_pid = pid;
+        } else if (display_owner_pid != pid) {
+            return 0;
+        }
+    }
+
     unsigned int *fb = (unsigned int *)FRAMEBUFFER_BASE;
     unsigned int start_x = (FRAMEBUFFER_WIDTH - width) / 2;
     unsigned int start_y = (FRAMEBUFFER_HEIGHT - height) / 2;
     for (unsigned int y = 0; y < height; y++) {
-        if (get_current() != (void *)0 &&
-            get_current()->state != THREAD_RUNNING) {
-            return -1;
-        }
         unsigned int *dst = fb + (start_y + y) * FRAMEBUFFER_WIDTH + start_x;
         memcpy(dst, bmp_image + y * width, width * sizeof(unsigned int));
         flush_dcache(dst, width * sizeof(unsigned int));
-        if ((y & 0x0fU) == 0 && get_current() != (void *)0 &&
-            get_current()->state == THREAD_RUNNING) {
-            schedule();
-        }
     }
     return 0;
+}
+
+void framebuffer_release_owner(int pid) {
+    if (pid != 0 && display_owner_pid == pid) {
+        display_owner_pid = 0;
+    }
 }

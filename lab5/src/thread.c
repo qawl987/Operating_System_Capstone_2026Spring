@@ -1,6 +1,7 @@
 #include "thread.h"
 
 #include "config.h"
+#include "framebuffer.h"
 #include "helper.h"
 #include "kmalloc.h"
 #include "uart.h"
@@ -20,6 +21,21 @@ static int next_pid = 1;
 #define TF_STATUS 32
 #define USER_IMAGE_BASE TEST_MEM_BASE
 #define SIGNAL_TRAMPOLINE_SIZE 16UL
+
+static inline unsigned long irq_save(void) {
+    unsigned long s;
+    asm volatile("csrr %0, sstatus" : "=r"(s));
+    asm volatile("csrci sstatus, 2" ::: "memory");
+    return s;
+}
+
+static inline void irq_restore(unsigned long s) {
+    if (s & 2UL) {
+        asm volatile("csrsi sstatus, 2" ::: "memory");
+    } else {
+        asm volatile("csrci sstatus, 2" ::: "memory");
+    }
+}
 
 static struct thread *alloc_thread(void (*func)(void)) {
     struct thread *t = (struct thread *)allocate(sizeof(struct thread));
@@ -49,7 +65,9 @@ static struct thread *alloc_thread(void (*func)(void)) {
     stack_top -= sizeof(struct trap_frame);
     t->context.sp = stack_top;
     t->context.ra = (uint64_t)func;
+    unsigned long irq_state = irq_save();
     list_add_tail(&t->all_list, &all_threads);
+    irq_restore(irq_state);
     return t;
 }
 
@@ -57,10 +75,13 @@ static void free_thread(struct thread *t) {
     if (t == (void *)0 || t == idle_thread || t == get_current()) {
         return;
     }
+    unsigned long irq_state = irq_save();
     list_del_init(&t->all_list);
     if (!list_empty(&t->list)) {
         list_del_init(&t->list);
     }
+    irq_restore(irq_state);
+    framebuffer_release_owner(t->pid);
     if (t->kernel_stack != (void *)0) {
         free(t->kernel_stack);
     }
@@ -104,12 +125,16 @@ void thread_system_init(void) {
     boot->parent = (void *)0;
     INIT_LIST_HEAD(&boot->list);
     INIT_LIST_HEAD(&boot->all_list);
+    unsigned long irq_state = irq_save();
     list_add_tail(&boot->all_list, &all_threads);
+    irq_restore(irq_state);
     asm volatile("mv tp, %0" : : "r"(boot));
 
     idle_thread = alloc_thread(idle);
     if (idle_thread != (void *)0) {
+        irq_state = irq_save();
         list_add_tail(&idle_thread->list, &run_queue);
+        irq_restore(irq_state);
     }
 }
 
@@ -122,7 +147,9 @@ struct thread *thread_create(void (*func)(void)) {
         return (void *)0;
     }
     t->parent = (void *)0;
+    unsigned long irq_state = irq_save();
     list_add_tail(&t->list, &run_queue);
+    irq_restore(irq_state);
     return t;
 }
 
@@ -130,6 +157,7 @@ void schedule(void) {
     struct thread *prev = get_current();
     struct thread *next = (void *)0;
 
+    unsigned long irq_state = irq_save();
     if (prev != (void *)0 && prev->state == THREAD_RUNNING &&
         prev != idle_thread) {
         list_add_tail(&prev->list, &run_queue);
@@ -148,8 +176,10 @@ void schedule(void) {
     }
 
     if (next == prev || next == (void *)0 || prev == (void *)0) {
+        irq_restore(irq_state);
         return;
     }
+    irq_restore(irq_state);
     switch_to(prev, next);
 }
 
@@ -164,6 +194,7 @@ void process_exit(int status) {
     }
     cur->exit_code = status;
     cur->state = THREAD_ZOMBIE;
+    framebuffer_release_owner(cur->pid);
     schedule();
     while (1) {
         asm volatile("wfi");
@@ -210,11 +241,14 @@ int process_stop(long pid) {
     }
     target->state = THREAD_ZOMBIE;
     target->parent = (void *)0;
+    framebuffer_release_owner(target->pid);
     printf("[INFO] Killing zombie thread with PID: %d\n", target->pid);
+    unsigned long irq_state = irq_save();
     if (!list_empty(&target->list)) {
         list_del_init(&target->list);
     }
     list_add_tail(&target->list, &zombie_queue);
+    irq_restore(irq_state);
     return 0;
 }
 
@@ -261,9 +295,11 @@ long process_kill(int pid, int signum) {
     if (target->state == THREAD_SLEEPING) {
         target->state = THREAD_RUNNING;
         target->wake_time = 0;
+        unsigned long irq_state = irq_save();
         if (list_empty(&target->list)) {
             list_add_tail(&target->list, &run_queue);
         }
+        irq_restore(irq_state);
     }
     return 0;
 }
@@ -344,6 +380,7 @@ long process_usleep(unsigned int usec) {
 
 void thread_wake_sleepers(uint64_t now) {
     struct list_head *pos = (void *)0;
+    unsigned long irq_state = irq_save();
     list_for_each(pos, &all_threads) {
         struct thread *t = list_entry(pos, struct thread, all_list);
         if (t->state == THREAD_SLEEPING && now >= t->wake_time) {
@@ -354,6 +391,7 @@ void thread_wake_sleepers(uint64_t now) {
             }
         }
     }
+    irq_restore(irq_state);
 }
 
 long process_fork(struct trap_frame *regs) {
@@ -411,8 +449,10 @@ long process_fork(struct trap_frame *regs) {
     child->context.ra = (uint64_t)ret_from_exception;
     child->context.sp = (uint64_t)child_regs;
 
+    unsigned long irq_state = irq_save();
     list_add_tail(&child->all_list, &all_threads);
     list_add_tail(&child->list, &run_queue);
+    irq_restore(irq_state);
     return child->pid;
 }
 
@@ -473,13 +513,16 @@ int process_spawn_user(const void *image, unsigned long size) {
     regs->x[TF_STATUS] = (1UL << 5);
     t->context.ra = (uint64_t)ret_from_exception;
     t->context.sp = (uint64_t)regs;
+    unsigned long irq_state = irq_save();
     list_add_tail(&t->list, &run_queue);
+    irq_restore(irq_state);
     return t->pid;
 }
 
 void kill_zombies(void) {
     struct list_head *pos = (void *)0;
     struct list_head *n = (void *)0;
+    unsigned long irq_state = irq_save();
     list_for_each_safe(pos, n, &zombie_queue) {
         struct thread *t = list_entry(pos, struct thread, list);
         list_del_init(&t->list);
@@ -490,11 +533,14 @@ void kill_zombies(void) {
             list_add_tail(&t->list, &zombie_queue);
             continue;
         }
+        irq_restore(irq_state);
         if (t->parent != (void *)0) {
             printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
         }
         free_thread(t);
+        irq_state = irq_save();
     }
+    irq_restore(irq_state);
 }
 
 void idle(void) {

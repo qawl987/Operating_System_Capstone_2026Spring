@@ -4,5 +4,6 @@
 int framebuffer_init(void);
 int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
                         unsigned int height);
+void framebuffer_release_owner(int pid);
 
 #endif /* FRAMEBUFFER_H */
