@@ -116,6 +116,7 @@ static void handle_interrupt(unsigned long cause, struct pt_regs *regs) {
         thread_wake_sleepers(rdtime());
         timer_handle_irq();
         timer_program_next();
+        // when current is u-mode and running, do preemption
         if (regs != (void *)0 && (regs->status & SSTATUS_SPP) == 0 &&
             get_current() != (void *)0 && get_current()->state == THREAD_RUNNING) {
             schedule();

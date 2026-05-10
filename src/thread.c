@@ -165,6 +165,7 @@ void schedule(void) {
         list_add_tail(&prev->list, &zombie_queue);
     }
 
+    // Take next in run_queue, otherwise run idle function
     if (!list_empty(&run_queue)) {
         next = list_first_entry(&run_queue, struct thread, list);
         list_del_init(&next->list);
@@ -201,6 +202,7 @@ void process_exit(int status) {
     }
 }
 
+// Check t->parent == current to free child thread
 long process_waitpid(long pid) {
     while (1) {
         struct list_head *pos = (void *)0;
@@ -343,6 +345,7 @@ void check_pending_signals(struct trap_frame *regs) {
     uint32_t *code = (uint32_t *)tramp;
     code[0] = 0x00b00893U;
     code[1] = 0x00000073U;
+    // fence.i drop cache
     asm volatile(".word 0x0000100f" ::: "memory");
 
     cur->signal_stack = stack;
@@ -417,6 +420,8 @@ long process_fork(struct trap_frame *regs) {
         return -1;
     }
 
+    // The contents of the child’s kernel stack and user stack are identical to those of the parent
+    // but their memory addresses differ.
     memcpy(child, parent, sizeof(*child));
     memcpy(kstack, parent->kernel_stack, THREAD_STACK_SIZE);
     if (parent->user_stack != (void *)0) {
@@ -437,10 +442,26 @@ long process_fork(struct trap_frame *regs) {
     child->parent = parent;
     INIT_LIST_HEAD(&child->list);
     INIT_LIST_HEAD(&child->all_list);
-
+    /* Trap frame is copied to the child’s kernel stack, and all pointers
+    that originally referenced the parent’s stack must be redirected
+    to the corresponding locations in the child’s own stack.
+    */
+    // memcpy(kstack, parent->kernel_stack, THREAD_STACK_SIZE);
+    // Trap frame located at tf_off in the parent’s kernel stack is 
+    // also copied to the child’s kernel stack at the same offset.
     uint64_t tf_off = (uint64_t)regs - (uint64_t)parent->kernel_stack;
     struct trap_frame *child_regs =
         (struct trap_frame *)((uint64_t)child->kernel_stack + tf_off);
+    /*
+    parent user stack                           child user stack
+    base = P_UBASE                              base = C_UBASE
+    |                                           |
+    |                                           |
+    | current user sp                           | child user sp
+    | offset = usp_off                          | offset = usp_off
+    |                                           |
+    +--------------------                       +--------------------
+    */
     if (parent->user_stack != (void *)0) {
         uint64_t usp_off = regs->x[TF_SP] - (uint64_t)parent->user_stack;
         child_regs->x[TF_SP] = (uint64_t)child->user_stack + usp_off;
