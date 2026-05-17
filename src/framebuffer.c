@@ -42,9 +42,7 @@ struct QEMU_PACKED fw_cfg_dma_access {
 static volatile uint64_t *const fw_cfg_dma =
     (volatile uint64_t *)(FW_CFG_BASE + 0x10);
 
-static uint16_t bswap16(uint16_t x) {
-    return (uint16_t)((x << 8) | (x >> 8));
-}
+static uint16_t bswap16(uint16_t x) { return (uint16_t)((x << 8) | (x >> 8)); }
 
 static void fw_cfg_dma_transfer(void *address, uint32_t length,
                                 uint32_t control) {
@@ -59,12 +57,14 @@ static void fw_cfg_dma_transfer(void *address, uint32_t length,
 }
 
 static void fw_cfg_read_entry(void *buf, uint32_t entry, uint32_t len) {
-    uint32_t control = (entry << 16) | FW_CFG_DMA_CTL_SELECT | FW_CFG_DMA_CTL_READ;
+    uint32_t control =
+        (entry << 16) | FW_CFG_DMA_CTL_SELECT | FW_CFG_DMA_CTL_READ;
     fw_cfg_dma_transfer(buf, len, control);
 }
 
 static void fw_cfg_write_entry(void *buf, uint32_t entry, uint32_t len) {
-    uint32_t control = (entry << 16) | FW_CFG_DMA_CTL_SELECT | FW_CFG_DMA_CTL_WRITE;
+    uint32_t control =
+        (entry << 16) | FW_CFG_DMA_CTL_SELECT | FW_CFG_DMA_CTL_WRITE;
     fw_cfg_dma_transfer(buf, len, control);
 }
 
@@ -138,13 +138,14 @@ int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
 
     struct thread *cur = get_current();
     int pid = cur != (void *)0 ? cur->pid : 0;
-    if (pid != 0) {
-        if (display_owner_pid == 0) {
-            display_owner_pid = pid;
-        } else if (display_owner_pid != pid) {
-            return 0;
-        }
-    }
+    // disable owner_pid
+    // if (pid != 0) {
+    //     if (display_owner_pid == 0) {
+    //         display_owner_pid = pid;
+    //     } else if (display_owner_pid != pid) {
+    //         return 0;
+    //     }
+    // }
 
     unsigned int *fb = (unsigned int *)FRAMEBUFFER_BASE;
     unsigned int start_x = (FRAMEBUFFER_WIDTH - width) / 2;
