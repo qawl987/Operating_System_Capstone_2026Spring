@@ -8,6 +8,7 @@
 #define THREAD_STACK_SIZE 4096UL
 #define USER_STACK_SIZE 4096UL
 #define SIGNAL_MAX 32
+#define MAX_VMA_REGIONS 32
 
 enum thread_state {
     THREAD_RUNNING = 0,
@@ -36,6 +37,13 @@ struct trap_frame {
     uint64_t x[35];
 };
 
+struct vm_area {
+    unsigned long start;
+    unsigned long end;
+    int prot;
+    int flags;
+};
+
 struct thread {
     struct cpu_context context;
     int pid;
@@ -52,6 +60,8 @@ struct thread {
     unsigned long *pgd;
     unsigned long user_image_size;
     unsigned long mmap_next;
+    int vma_count;
+    struct vm_area vmas[MAX_VMA_REGIONS];
     void (*entry)(void);
     struct thread *parent;
     struct list_head list;
@@ -67,6 +77,7 @@ long process_waitpid(long pid);
 int process_stop(long pid);
 long process_usleep(unsigned int usec);
 long process_mmap(void *addr, unsigned long length, int prot, int flags);
+int process_handle_page_fault(unsigned long addr, unsigned long cause);
 long process_signal(int signum, void (*handler)(void));
 void process_sigreturn(struct trap_frame *regs);
 long process_kill(int pid, int signum);

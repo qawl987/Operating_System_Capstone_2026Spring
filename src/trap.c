@@ -153,6 +153,9 @@ static void handle_exception(unsigned long cause, struct pt_regs *regs) {
 
     if (regs != (void *)0 && (regs->status & SSTATUS_SPP) == 0 &&
         is_page_fault(cause)) {
+        if (process_handle_page_fault(regs->badvaddr, cause) == 0) {
+            return;
+        }
         printf("[Segmentation fault]: Kill Process\n");
         process_exit(0);
         return;

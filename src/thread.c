@@ -59,6 +59,7 @@ static struct thread *alloc_thread(void (*func)(void)) {
     t->pgd = vm_kernel_pgd();
     t->user_image_size = 0;
     t->mmap_next = USER_MMAP_BASE;
+    t->vma_count = 0;
     t->entry = func;
     t->parent = get_current();
     INIT_LIST_HEAD(&t->list);
@@ -126,6 +127,7 @@ void thread_system_init(void) {
     boot->pgd = vm_kernel_pgd();
     boot->user_image_size = 0;
     boot->mmap_next = USER_MMAP_BASE;
+    boot->vma_count = 0;
     boot->entry = (void *)0;
     boot->parent = (void *)0;
     INIT_LIST_HEAD(&boot->list);
@@ -392,6 +394,7 @@ static uint64_t rdtime(void) {
 #define MMAP_PROT_WRITE 2
 #define MMAP_PROT_EXEC 4
 #define MMAP_ANONYMOUS 0x20
+#define MMAP_POPULATE 0x8000
 
 static unsigned long mmap_prot_to_pte(int prot) {
     unsigned long pte = PROT_USER_BASE;
@@ -411,41 +414,118 @@ static unsigned long mmap_prot_to_pte(int prot) {
     return pte;
 }
 
+static int vma_ranges_overlap(unsigned long a_start, unsigned long a_end,
+                              unsigned long b_start, unsigned long b_end) {
+    return a_start < b_end && b_start < a_end;
+}
+
+static struct vm_area *find_vma(struct thread *t, unsigned long addr) {
+    if (t == (void *)0) {
+        return (void *)0;
+    }
+    for (int i = 0; i < t->vma_count; i++) {
+        if (addr >= t->vmas[i].start && addr < t->vmas[i].end) {
+            return &t->vmas[i];
+        }
+    }
+    return (void *)0;
+}
+
+static int vma_conflicts(struct thread *t, unsigned long start,
+                         unsigned long end) {
+    for (int i = 0; i < t->vma_count; i++) {
+        if (vma_ranges_overlap(start, end, t->vmas[i].start, t->vmas[i].end)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int map_anonymous_page(struct thread *t, unsigned long va,
+                              unsigned long pte_prot) {
+    void *page = allocate(VM_PAGE_SIZE);
+    if (page == (void *)0) {
+        return -1;
+    }
+    memset(page, 0, VM_PAGE_SIZE);
+    if (vm_map_pages(t->pgd, va, VM_PAGE_SIZE,
+                     virt_to_phys((unsigned long)page), pte_prot) < 0) {
+        free(page);
+        return -1;
+    }
+    return 0;
+}
+
 long process_mmap(void *addr, unsigned long length, int prot, int flags) {
     struct thread *cur = get_current();
     if (cur == (void *)0 || cur->pgd == (void *)0 || length == 0 ||
-        (flags & MMAP_ANONYMOUS) == 0) {
+        (flags & MMAP_ANONYMOUS) == 0 || cur->vma_count >= MAX_VMA_REGIONS) {
         return -1;
     }
 
     unsigned long size = (length + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
     unsigned long va = (unsigned long)addr;
     if (va == 0 || (va & (VM_PAGE_SIZE - 1)) != 0 ||
-        va < USER_MMAP_BASE || va + size > USER_MMAP_END) {
+        va < USER_MMAP_BASE || va + size > USER_MMAP_END ||
+        vma_conflicts(cur, va, va + size)) {
         va = cur->mmap_next;
+        while (va + size <= USER_MMAP_END && vma_conflicts(cur, va, va + size)) {
+            va += size;
+        }
     }
     if (va + size > USER_MMAP_END) {
         return -1;
     }
 
-    unsigned long pte_prot = mmap_prot_to_pte(prot);
-    for (unsigned long off = 0; off < size; off += VM_PAGE_SIZE) {
-        void *page = allocate(VM_PAGE_SIZE);
-        if (page == (void *)0) {
-            return -1;
-        }
-        memset(page, 0, VM_PAGE_SIZE);
-        if (vm_map_pages(cur->pgd, va + off, VM_PAGE_SIZE,
-                         virt_to_phys((unsigned long)page), pte_prot) < 0) {
-            free(page);
-            return -1;
-        }
-    }
+    struct vm_area *vma = &cur->vmas[cur->vma_count++];
+    vma->start = va;
+    vma->end = va + size;
+    vma->prot = prot;
+    vma->flags = flags;
 
     if (va + size > cur->mmap_next) {
         cur->mmap_next = va + size;
     }
+
+    if (flags & MMAP_POPULATE) {
+        unsigned long pte_prot = mmap_prot_to_pte(prot);
+        for (unsigned long off = 0; off < size; off += VM_PAGE_SIZE) {
+            if (map_anonymous_page(cur, va + off, pte_prot) < 0) {
+                return -1;
+            }
+        }
+    }
     return (long)va;
+}
+
+int process_handle_page_fault(unsigned long addr, unsigned long cause) {
+    struct thread *cur = get_current();
+    struct vm_area *vma = find_vma(cur, addr);
+    if (vma == (void *)0) {
+        return -1;
+    }
+
+    int need = 0;
+    if (cause == 12) {
+        need = MMAP_PROT_EXEC;
+    } else if (cause == 13) {
+        need = MMAP_PROT_READ;
+    } else if (cause == 15) {
+        need = MMAP_PROT_WRITE;
+    }
+    if ((vma->prot & need) == 0) {
+        return -1;
+    }
+
+    unsigned long page_va = addr & ~(VM_PAGE_SIZE - 1);
+    if (vm_translate(cur->pgd, page_va) != 0) {
+        return -1;
+    }
+    if (map_anonymous_page(cur, page_va, mmap_prot_to_pte(vma->prot)) < 0) {
+        return -1;
+    }
+    printf("[Translation fault]: %x\n", page_va);
+    return 0;
 }
 
 long process_usleep(unsigned int usec) {
@@ -531,6 +611,13 @@ static int install_user_image(struct thread *t, const void *image, unsigned long
     t->pgd = pgd;
     t->user_image_size = size;
     t->mmap_next = USER_MMAP_BASE;
+    t->vma_count = 0;
+    t->vmas[t->vma_count++] = (struct vm_area){
+        .start = USER_STACK_REGION_BASE,
+        .end = USER_STACK_TOP,
+        .prot = MMAP_PROT_READ | MMAP_PROT_WRITE,
+        .flags = MMAP_ANONYMOUS,
+    };
     return 0;
 }
 
