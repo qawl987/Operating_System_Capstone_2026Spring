@@ -135,7 +135,6 @@ int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
     }
 
     struct thread *cur = get_current();
-    int pid = cur != (void *)0 ? cur->pid : 0;
 
     unsigned int *fb = (unsigned int *)phys_to_virt(FRAMEBUFFER_BASE);
     unsigned int start_x = (FRAMEBUFFER_WIDTH - width) / 2;
