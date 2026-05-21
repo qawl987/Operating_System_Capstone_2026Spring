@@ -16,6 +16,9 @@ extern void ret_from_exception(void);
 #define SCAUSE_SUPERVISOR_TIMER 5UL
 #define SCAUSE_SUPERVISOR_EXTERNAL 9UL
 #define SCAUSE_USER_ECALL 8UL
+#define SCAUSE_INST_PAGE_FAULT 12UL
+#define SCAUSE_LOAD_PAGE_FAULT 13UL
+#define SCAUSE_STORE_PAGE_FAULT 15UL
 #define SSTATUS_SPP (1UL << 8)
 
 static uint64_t boot_hart_id;
@@ -136,10 +139,22 @@ static void handle_interrupt(unsigned long cause, struct pt_regs *regs) {
     }
 }
 
+static int is_page_fault(unsigned long cause) {
+    return cause == SCAUSE_INST_PAGE_FAULT || cause == SCAUSE_LOAD_PAGE_FAULT ||
+           cause == SCAUSE_STORE_PAGE_FAULT;
+}
+
 static void handle_exception(unsigned long cause, struct pt_regs *regs) {
     if (cause == SCAUSE_USER_ECALL) {
         regs->epc += 4;
         syscall_handler(regs);
+        return;
+    }
+
+    if (regs != (void *)0 && (regs->status & SSTATUS_SPP) == 0 &&
+        is_page_fault(cause)) {
+        printf("[Segmentation fault]: Kill Process\n");
+        process_exit(0);
         return;
     }
 

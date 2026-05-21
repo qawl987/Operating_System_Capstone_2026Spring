@@ -58,6 +58,7 @@ static struct thread *alloc_thread(void (*func)(void)) {
     t->user_stack = (void *)0;
     t->pgd = vm_kernel_pgd();
     t->user_image_size = 0;
+    t->mmap_next = USER_MMAP_BASE;
     t->entry = func;
     t->parent = get_current();
     INIT_LIST_HEAD(&t->list);
@@ -124,6 +125,7 @@ void thread_system_init(void) {
     boot->user_stack = (void *)0;
     boot->pgd = vm_kernel_pgd();
     boot->user_image_size = 0;
+    boot->mmap_next = USER_MMAP_BASE;
     boot->entry = (void *)0;
     boot->parent = (void *)0;
     INIT_LIST_HEAD(&boot->list);
@@ -386,6 +388,66 @@ static uint64_t rdtime(void) {
     return t;
 }
 
+#define MMAP_PROT_READ 1
+#define MMAP_PROT_WRITE 2
+#define MMAP_PROT_EXEC 4
+#define MMAP_ANONYMOUS 0x20
+
+static unsigned long mmap_prot_to_pte(int prot) {
+    unsigned long pte = PROT_USER_BASE;
+
+    if (prot & MMAP_PROT_READ) {
+        pte |= PTE_R;
+    }
+    if (prot & MMAP_PROT_WRITE) {
+        pte |= PTE_W;
+        if (prot & MMAP_PROT_READ) {
+            pte |= PTE_R;
+        }
+    }
+    if (prot & MMAP_PROT_EXEC) {
+        pte |= PTE_X;
+    }
+    return pte;
+}
+
+long process_mmap(void *addr, unsigned long length, int prot, int flags) {
+    struct thread *cur = get_current();
+    if (cur == (void *)0 || cur->pgd == (void *)0 || length == 0 ||
+        (flags & MMAP_ANONYMOUS) == 0) {
+        return -1;
+    }
+
+    unsigned long size = (length + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
+    unsigned long va = (unsigned long)addr;
+    if (va == 0 || (va & (VM_PAGE_SIZE - 1)) != 0 ||
+        va < USER_MMAP_BASE || va + size > USER_MMAP_END) {
+        va = cur->mmap_next;
+    }
+    if (va + size > USER_MMAP_END) {
+        return -1;
+    }
+
+    unsigned long pte_prot = mmap_prot_to_pte(prot);
+    for (unsigned long off = 0; off < size; off += VM_PAGE_SIZE) {
+        void *page = allocate(VM_PAGE_SIZE);
+        if (page == (void *)0) {
+            return -1;
+        }
+        memset(page, 0, VM_PAGE_SIZE);
+        if (vm_map_pages(cur->pgd, va + off, VM_PAGE_SIZE,
+                         virt_to_phys((unsigned long)page), pte_prot) < 0) {
+            free(page);
+            return -1;
+        }
+    }
+
+    if (va + size > cur->mmap_next) {
+        cur->mmap_next = va + size;
+    }
+    return (long)va;
+}
+
 long process_usleep(unsigned int usec) {
     struct thread *cur = get_current();
     if (cur == (void *)0) {
@@ -468,6 +530,7 @@ static int install_user_image(struct thread *t, const void *image, unsigned long
     t->user_stack = stack;
     t->pgd = pgd;
     t->user_image_size = size;
+    t->mmap_next = USER_MMAP_BASE;
     return 0;
 }
 

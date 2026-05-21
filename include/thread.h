@@ -51,6 +51,7 @@ struct thread {
     void *user_stack;
     unsigned long *pgd;
     unsigned long user_image_size;
+    unsigned long mmap_next;
     void (*entry)(void);
     struct thread *parent;
     struct list_head list;
@@ -65,6 +66,7 @@ void process_exit(int status);
 long process_waitpid(long pid);
 int process_stop(long pid);
 long process_usleep(unsigned int usec);
+long process_mmap(void *addr, unsigned long length, int prot, int flags);
 long process_signal(int signum, void (*handler)(void));
 void process_sigreturn(struct trap_frame *regs);
 long process_kill(int pid, int signum);

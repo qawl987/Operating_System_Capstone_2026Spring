@@ -19,6 +19,7 @@ enum {
     SYS_SIGNAL = 10,
     SYS_SIGRETURN = 11,
     SYS_KILL = 12,
+    SYS_MMAP = 13,
 };
 
 static unsigned long initrd_start;
@@ -122,6 +123,10 @@ void syscall_handler(struct pt_regs *regs) {
         if (ret == 0) {
             schedule();
         }
+        break;
+    case SYS_MMAP:
+        ret = process_mmap((void *)regs->a0, (unsigned long)regs->a1,
+                           (int)regs->a2, (int)regs->a3);
         break;
     default:
         ret = -1;
