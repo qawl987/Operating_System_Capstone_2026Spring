@@ -339,12 +339,35 @@ void check_pending_signals(struct trap_frame *regs) {
         cur->pending_signals |= (1U << signum);
         return;
     }
+    memset(stack, 0, USER_STACK_SIZE);
+    /*
+     * The allocated stack pointer is a kernel higher-half VA. User mode cannot
+     * access that address directly, so map the same physical page into this
+     * process's user page table at a fixed signal-stack VA.
+     *
+     * The trampoline lives on this page too. It must be executable because the
+     * signal handler returns to it through ra, then the trampoline issues the
+     * sigreturn syscall to restore the saved trap frame.
+     */
+    if (vm_map_pages(cur->pgd, USER_SIGNAL_STACK_PAGE_VA, USER_STACK_SIZE,
+                     virt_to_phys((unsigned long)stack), PROT_USER_RWX) < 0) {
+        free(stack);
+        cur->pending_signals |= (1U << signum);
+        return;
+    }
 
     memcpy(&cur->backup_trap_frame, regs, sizeof(*regs));
-    uint64_t tramp = ((uint64_t)stack + USER_STACK_SIZE -
-                      SIGNAL_TRAMPOLINE_SIZE) &
-                     ~0xFUL;
-    uint32_t *code = (uint32_t *)tramp;
+    /*
+     * Put the trampoline at the top of the user-visible signal stack and keep it
+     * 16-byte aligned for the user ABI. tramp_user is written into the trap
+     * frame, while tramp_kernel is the kernel alias used to copy the actual
+     * trampoline instructions into the backing physical page.
+     */
+    uint64_t tramp_user = (USER_SIGNAL_STACK_TOP - SIGNAL_TRAMPOLINE_SIZE) &
+                          ~0xFUL;
+    uint64_t tramp_kernel =
+        (uint64_t)stack + (tramp_user - USER_SIGNAL_STACK_PAGE_VA);
+    uint32_t *code = (uint32_t *)tramp_kernel;
     code[0] = 0x00b00893U;
     code[1] = 0x00000073U;
     // fence.i drop cache
@@ -353,8 +376,8 @@ void check_pending_signals(struct trap_frame *regs) {
     cur->signal_stack = stack;
     cur->processing_signal = 1;
     regs->x[TF_EPC] = (uint64_t)handler;
-    regs->x[TF_SP] = tramp;
-    regs->x[TF_RA] = tramp;
+    regs->x[TF_SP] = tramp_user;
+    regs->x[TF_RA] = tramp_user;
 }
 
 static uint64_t rdtime(void) {

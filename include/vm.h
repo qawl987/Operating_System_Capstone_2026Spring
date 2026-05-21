@@ -10,6 +10,8 @@
 #define VM_ENTRIES_PER_TABLE 512
 
 #define USER_TEXT_VA 0x0UL
+#define USER_SIGNAL_STACK_PAGE_VA 0x3fffffe000UL
+#define USER_SIGNAL_STACK_TOP 0x3ffffff000UL
 #define USER_STACK_PAGE_VA 0x3ffffff000UL
 #define USER_STACK_TOP 0x4000000000UL
 
@@ -27,6 +29,7 @@
 #define PROT_USER_BASE (PTE_V | PTE_U | PTE_A | PTE_D)
 #define PROT_USER_RX (PROT_USER_BASE | PTE_R | PTE_X)
 #define PROT_USER_RW (PROT_USER_BASE | PTE_R | PTE_W)
+#define PROT_USER_RWX (PROT_USER_BASE | PTE_R | PTE_W | PTE_X)
 
 #define SATP_SV39 (8UL << 60)
 #define MAKE_SATP(pgd_pa) (SATP_SV39 | ((unsigned long)(pgd_pa) >> 12))
