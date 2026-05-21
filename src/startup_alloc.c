@@ -11,6 +11,7 @@
 #include "kmalloc.h"
 #include "logger.h"
 #include "uart.h"
+#include "vm.h"
 
 /* Reserved regions array */
 static struct reserved_region reserved_regions[MAX_RESERVED_REGIONS];
@@ -183,7 +184,7 @@ void *startup_alloc(uint64_t size, uint64_t align) {
     log_info("[Startup] Allocated 0x%x - 0x%x (%d KB)\n", aligned_ptr,
              alloc_end, (unsigned int)(size / 1024));
 
-    return (void *)aligned_ptr;
+    return (void *)phys_to_virt(aligned_ptr);
 }
 
 /**
@@ -238,20 +239,20 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     /* 2. Mark reserved regions BEFORE initializing startup allocator */
 
     /* Reserve DTB blob */
-    uint64_t dtb_start = (uint64_t)dtb_base;
+    uint64_t dtb_start = virt_to_phys((uint64_t)dtb_base);
     uint64_t dtb_size = fdt_totalsize(dtb_base);
     log_info("Reserving DTB: 0x%x - 0x%x\n", dtb_start, dtb_start + dtb_size);
     startup_add_reserved(dtb_start, dtb_size);
 
     /* Reserve Kernel image */
-    uint64_t kernel_start = (uint64_t)_kernel_start;
-    uint64_t kernel_end_addr = (uint64_t)_kernel_end;
+    uint64_t kernel_start = virt_to_phys((uint64_t)_kernel_start);
+    uint64_t kernel_end_addr = virt_to_phys((uint64_t)_kernel_end);
     uint64_t kernel_size = kernel_end_addr - kernel_start;
     log_info("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end_addr);
     startup_add_reserved(kernel_start, kernel_size);
 
     /* Reserve bootloader relocation area */
-    uint64_t reloc_size = (uint64_t)_load_end - (uint64_t)_load_start;
+    uint64_t reloc_size = virt_to_phys((uint64_t)_load_end) - (uint64_t)_load_start;
     log_info("Reserving RELOC area: 0x%x - 0x%x\n", (uint64_t)RELOC_ADDR,
              (uint64_t)RELOC_ADDR + reloc_size);
     startup_add_reserved(RELOC_ADDR, reloc_size);
@@ -260,7 +261,7 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     if (initrd_start && initrd_end && initrd_end > initrd_start) {
         log_info("Reserving Initramfs: 0x%x - 0x%x\n", initrd_start,
                  initrd_end);
-        startup_add_reserved(initrd_start, initrd_end - initrd_start);
+        startup_add_reserved(virt_to_phys(initrd_start), initrd_end - initrd_start);
     }
 
     /* Parse and reserve /reserved-memory regions from DTB */
@@ -298,7 +299,7 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     }
 
     /* Also mark the frame array itself as reserved */
-    startup_add_reserved((uint64_t)frame_array, frame_array_size);
+    startup_add_reserved(virt_to_phys((uint64_t)frame_array), frame_array_size);
 
     /* 5. Initialize buddy system with hole-punching reserved regions */
     buddy_init_with_frame_array(mem.start, mem.size, frame_array, array_pages);

@@ -49,6 +49,8 @@ struct thread {
     int processing_signal;
     void *kernel_stack;
     void *user_stack;
+    unsigned long *pgd;
+    unsigned long user_image_size;
     void (*entry)(void);
     struct thread *parent;
     struct list_head list;

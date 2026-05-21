@@ -1,4 +1,5 @@
 #include "thread.h"
+#include "vm.h"
 
 #ifdef PLATFORM_PI
 // Orange Pi RV2: PXA UART, reg-shift=2, reg-io-width=4
@@ -22,7 +23,7 @@ typedef volatile unsigned char uart_reg_t;
 #define MCR_OUT2 (1 << 3)
 #endif
 
-static unsigned long uart_base = UART_BASE;
+static unsigned long uart_base = PAGE_OFFSET + UART_BASE;
 #define UART_BUF_SIZE 512
 static char rx_buf[UART_BUF_SIZE];
 static char tx_buf[UART_BUF_SIZE];
@@ -69,7 +70,7 @@ static inline uart_reg_t *uart_mcr(void) {
 }
 
 void uart_init(unsigned long base) {
-    uart_base = base;
+    uart_base = phys_to_virt(base);
     uart_polling_mode = 0;
     rx_r = 0;
     rx_w = 0;

@@ -6,6 +6,7 @@
 #include "timer.h"
 #include "trap.h"
 #include "uart.h"
+#include "vm.h"
 
 extern void handle_exception_entry(void);
 extern void ret_from_exception(void);
@@ -63,11 +64,11 @@ static inline uint32_t plic_read(uint64_t addr) {
 }
 
 static inline uint64_t plic_priority_addr(uint32_t irq) {
-    return PLIC_BASE + ((uint64_t)irq << 2);
+    return phys_to_virt(PLIC_BASE + ((uint64_t)irq << 2));
 }
 
 static inline uint64_t plic_s_enable_addr(uint64_t hart) {
-    return PLIC_BASE + PLIC_S_ENABLE_BASE + (hart * 0x80UL);
+    return phys_to_virt(PLIC_BASE + PLIC_S_ENABLE_BASE + (hart * 0x80UL));
 }
 
 static inline uint64_t plic_s_enable_word_addr(uint64_t hart, uint32_t irq) {
@@ -75,11 +76,11 @@ static inline uint64_t plic_s_enable_word_addr(uint64_t hart, uint32_t irq) {
 }
 
 static inline uint64_t plic_s_threshold_addr(uint64_t hart) {
-    return PLIC_BASE + PLIC_S_THRESHOLD_BASE + (hart * 0x2000UL);
+    return phys_to_virt(PLIC_BASE + PLIC_S_THRESHOLD_BASE + (hart * 0x2000UL));
 }
 
 static inline uint64_t plic_s_claim_addr(uint64_t hart) {
-    return PLIC_BASE + PLIC_S_CLAIM_BASE + (hart * 0x2000UL);
+    return phys_to_virt(PLIC_BASE + PLIC_S_CLAIM_BASE + (hart * 0x2000UL));
 }
 
 static void plic_init(void) {

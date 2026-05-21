@@ -70,7 +70,12 @@ void syscall_handler(struct pt_regs *regs) {
         return;
     }
 
-    asm volatile("csrsi sstatus, 2");
+    asm volatile("csrsi sstatus, 2\n"
+                 "li t0, (1 << 18)\n"
+                 "csrs sstatus, t0"
+                 :
+                 :
+                 : "memory", "t0");
 
     switch (regs->a7) {
     case SYS_GETPID:

@@ -10,6 +10,7 @@
 #include "config.h"
 #include "logger.h"
 #include "uart.h"
+#include "vm.h"
 
 /* Pool sizes in bytes */
 static const unsigned int pool_sizes[NUM_POOL_SIZES] = {16,  32,  64,   128,
@@ -73,7 +74,7 @@ static int expand_pool(int pool_idx) {
 
     /* Partition the page into chunks */
     for (offset = 0; offset < PAGE_SIZE; offset += chunk_size) {
-        struct chunk *c = (struct chunk *)(page_addr + offset);
+        struct chunk *c = (struct chunk *)phys_to_virt(page_addr + offset);
         INIT_LIST_HEAD(&c->list);
         list_add_tail(&c->list, &pool->free_list);
     }
@@ -130,7 +131,7 @@ void *kmalloc(unsigned int size) {
             return (void *)0;
         }
 
-        addr = (void *)page_to_addr(page_idx);
+        addr = (void *)phys_to_virt(page_to_addr(page_idx));
         log_spec("[Kmalloc] Allocate page 0x%x for size %d (order %d)\n",
                  (unsigned long)addr, size, order);
         return addr;
@@ -180,7 +181,7 @@ void kfree(void *ptr) {
     addr = (unsigned long)ptr;
 
     /* Calculate the page base address */
-    page_base = addr & ~(PAGE_SIZE - 1);
+    page_base = virt_to_phys(addr) & ~(PAGE_SIZE - 1);
     page_idx = addr_to_page(page_base);
 
     /* Get chunk_size from the frame info */

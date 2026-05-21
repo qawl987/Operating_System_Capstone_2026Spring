@@ -14,6 +14,7 @@
 #include "trap.h"
 #include "thread.h"
 #include "uart.h"
+#include "vm.h"
 /* Global state for initrd addresses */
 static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
@@ -132,17 +133,17 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
             fdt_getprop(dtb_base, offset, "linux,initrd-start", &len);
         if (reg) {
             if (len >= 8) {
-                g_initrd_start = bswap64(*(const uint64_t *)reg);
+                g_initrd_start = phys_to_virt(bswap64(*(const uint64_t *)reg));
             } else if (len >= 4) {
-                g_initrd_start = bswap32(*(const uint32_t *)reg);
+                g_initrd_start = phys_to_virt(bswap32(*(const uint32_t *)reg));
             }
         }
         reg = fdt_getprop(dtb_base, offset, "linux,initrd-end", &len);
         if (reg) {
             if (len >= 8) {
-                g_initrd_end = bswap64(*(const uint64_t *)reg);
+                g_initrd_end = phys_to_virt(bswap64(*(const uint64_t *)reg));
             } else if (len >= 4) {
-                g_initrd_end = bswap32(*(const uint32_t *)reg);
+                g_initrd_end = phys_to_virt(bswap32(*(const uint32_t *)reg));
             }
         }
     }
@@ -160,6 +161,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     uart_puts("========================================\n\n");
 
     /* Initialize memory system using startup allocator */
+    startup_add_reserved(0x80100000UL, 0x10000UL);
     startup_add_reserved(TEST_MEM_BASE, USER_IMAGE_SIZE);
     startup_add_reserved(FRAMEBUFFER_BASE, FRAMEBUFFER_SIZE);
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);

@@ -3,6 +3,7 @@
 #include "config.h"
 #include "helper.h"
 #include "thread.h"
+#include "vm.h"
 
 #define XRGB8888 875713112U
 #define QEMU_PACKED __attribute__((packed))
@@ -15,8 +16,6 @@ struct QEMU_PACKED ramfb_cfg {
     uint32_t height;
     uint32_t stride;
 };
-
-static int display_owner_pid;
 
 #ifdef PLATFORM_QEMU
 #define FW_CFG_BASE 0x10100000UL
@@ -40,7 +39,7 @@ struct QEMU_PACKED fw_cfg_dma_access {
 };
 
 static volatile uint64_t *const fw_cfg_dma =
-    (volatile uint64_t *)(FW_CFG_BASE + 0x10);
+    (volatile uint64_t *)(PAGE_OFFSET + FW_CFG_BASE + 0x10);
 
 static uint16_t bswap16(uint16_t x) { return (uint16_t)((x << 8) | (x >> 8)); }
 
@@ -49,9 +48,9 @@ static void fw_cfg_dma_transfer(void *address, uint32_t length,
     struct fw_cfg_dma_access access = {
         .control = bswap32(control),
         .length = bswap32(length),
-        .address = bswap64((uint64_t)address),
+        .address = bswap64(virt_to_phys((uint64_t)address)),
     };
-    *fw_cfg_dma = bswap64((uint64_t)&access);
+    *fw_cfg_dma = bswap64(virt_to_phys((uint64_t)&access));
     while ((bswap32(access.control) & ~FW_CFG_DMA_CTL_ERROR) != 0) {
     }
 }
@@ -110,7 +109,6 @@ static void flush_dcache(void *addr, unsigned long len) {
 #endif
 
 int framebuffer_init(void) {
-    display_owner_pid = 0;
 #ifdef PLATFORM_QEMU
     int ramfb = fw_cfg_find_file("etc/ramfb");
     if (ramfb < 0) {
@@ -138,16 +136,8 @@ int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
 
     struct thread *cur = get_current();
     int pid = cur != (void *)0 ? cur->pid : 0;
-    // disable owner_pid
-    // if (pid != 0) {
-    //     if (display_owner_pid == 0) {
-    //         display_owner_pid = pid;
-    //     } else if (display_owner_pid != pid) {
-    //         return 0;
-    //     }
-    // }
 
-    unsigned int *fb = (unsigned int *)FRAMEBUFFER_BASE;
+    unsigned int *fb = (unsigned int *)phys_to_virt(FRAMEBUFFER_BASE);
     unsigned int start_x = (FRAMEBUFFER_WIDTH - width) / 2;
     unsigned int start_y = (FRAMEBUFFER_HEIGHT - height) / 2;
     for (unsigned int y = 0; y < height; y++) {
@@ -156,10 +146,4 @@ int framebuffer_display(const unsigned int *bmp_image, unsigned int width,
         flush_dcache(dst, width * sizeof(unsigned int));
     }
     return 0;
-}
-
-void framebuffer_release_owner(int pid) {
-    if (pid != 0 && display_owner_pid == pid) {
-        display_owner_pid = 0;
-    }
 }

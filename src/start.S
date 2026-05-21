@@ -15,31 +15,44 @@
 
 _start:
     // === 1. Multi-core Check ===
-    bnez a0, park_core
+    bnez a0, boot_park_core
 
-    // Save Hart ID and DTB address
+    // Save Hart ID and physical DTB address while paging is still off.
     mv   s0, a0
     mv   s1, a1
 
-    // Clear .bss section
-    la   t0, __bss_start
-    la   t1, __bss_stop
+    lla  sp, boot_stack_top
+    call setup_vm
 
-bss_clear:
-    bgeu t0, t1, bss_done
-    sd   zero, 0(t0)
-    addi t0, t0, 8
-    j    bss_clear
-
-bss_done:
-    // Set stack pointer
-    la   sp, _end
-
-    // Call start_kernel
+    // Drop the temporary identity map while executing the boot code through
+    // its higher-half alias, then return into the higher-half kernel entry.
+    li   t0, 0xffffffc000000000
+    li   sp, 0xffffffc080110000
     mv   a0, s0
-    mv   a1, s1
+    add  a1, s1, t0
+    li   ra, 0xffffffc080400000
+    lla  t1, drop_identity_map
+    add  t1, t1, t0
+    jr   t1
+
+boot_park_core:
+    wfi
+    j boot_park_core
+
+.section ".text.entry"
+.global kernel_entry
+kernel_entry:
+    la   t1, __bss_start
+    la   t2, __bss_stop
+1:
+    bgeu t1, t2, 2f
+    sd   zero, 0(t1)
+    addi t1, t1, 8
+    j    1b
+2:
     tail start_kernel
 
+.section ".text"
 .global handle_exception_entry
 .align 2
 handle_exception_entry:
@@ -185,3 +198,9 @@ copy_done:
 park_core:
     wfi
     j    park_core
+
+.section ".bss.boot"
+.align 12
+boot_stack:
+    .space 4096
+boot_stack_top:

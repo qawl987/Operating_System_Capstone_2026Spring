@@ -5,6 +5,7 @@
 #include "helper.h"
 #include "kmalloc.h"
 #include "uart.h"
+#include "vm.h"
 
 extern void ret_from_exception(void);
 
@@ -19,7 +20,6 @@ static int next_pid = 1;
 #define TF_A0 9
 #define TF_EPC 31
 #define TF_STATUS 32
-#define USER_IMAGE_BASE TEST_MEM_BASE
 #define SIGNAL_TRAMPOLINE_SIZE 16UL
 
 static inline unsigned long irq_save(void) {
@@ -56,6 +56,8 @@ static struct thread *alloc_thread(void (*func)(void)) {
     t->wake_time = 0;
     t->kernel_stack = stack;
     t->user_stack = (void *)0;
+    t->pgd = vm_kernel_pgd();
+    t->user_image_size = 0;
     t->entry = func;
     t->parent = get_current();
     INIT_LIST_HEAD(&t->list);
@@ -81,7 +83,6 @@ static void free_thread(struct thread *t) {
         list_del_init(&t->list);
     }
     irq_restore(irq_state);
-    framebuffer_release_owner(t->pid);
     if (t->kernel_stack != (void *)0) {
         free(t->kernel_stack);
     }
@@ -121,6 +122,8 @@ void thread_system_init(void) {
     boot->wake_time = 0;
     boot->kernel_stack = (void *)0;
     boot->user_stack = (void *)0;
+    boot->pgd = vm_kernel_pgd();
+    boot->user_image_size = 0;
     boot->entry = (void *)0;
     boot->parent = (void *)0;
     INIT_LIST_HEAD(&boot->list);
@@ -181,6 +184,7 @@ void schedule(void) {
         return;
     }
     irq_restore(irq_state);
+    vm_switch(next->pgd);
     switch_to(prev, next);
 }
 
@@ -195,7 +199,6 @@ void process_exit(int status) {
     }
     cur->exit_code = status;
     cur->state = THREAD_ZOMBIE;
-    framebuffer_release_owner(cur->pid);
     schedule();
     while (1) {
         asm volatile("wfi");
@@ -243,7 +246,6 @@ int process_stop(long pid) {
     }
     target->state = THREAD_ZOMBIE;
     target->parent = (void *)0;
-    framebuffer_release_owner(target->pid);
     printf("[INFO] Killing zombie thread with PID: %d\n", target->pid);
     unsigned long irq_state = irq_save();
     if (!list_empty(&target->list)) {
@@ -397,10 +399,59 @@ void thread_wake_sleepers(uint64_t now) {
     irq_restore(irq_state);
 }
 
+static int install_user_image(struct thread *t, const void *image, unsigned long size) {
+    if (t == (void *)0 || image == (void *)0 || size == 0 || size > USER_IMAGE_SIZE) {
+        return -1;
+    }
+
+    unsigned long *pgd = vm_create_user_pgd();
+    if (pgd == (void *)0) {
+        return -1;
+    }
+
+    unsigned long mapped = (size + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
+    for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
+        void *page = allocate(VM_PAGE_SIZE);
+        if (page == (void *)0) {
+            return -1;
+        }
+        memset(page, 0, VM_PAGE_SIZE);
+        if (off < size) {
+            unsigned long n = size - off;
+            if (n > VM_PAGE_SIZE) {
+                n = VM_PAGE_SIZE;
+            }
+            memcpy(page, (const char *)image + off, n);
+        }
+        if (vm_map_pages(pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
+                         virt_to_phys((unsigned long)page), PROT_USER_RX) < 0) {
+            return -1;
+        }
+    }
+
+    void *stack = allocate(USER_STACK_SIZE);
+    if (stack == (void *)0) {
+        return -1;
+    }
+    memset(stack, 0, USER_STACK_SIZE);
+    if (vm_map_pages(pgd, USER_STACK_PAGE_VA, USER_STACK_SIZE,
+                     virt_to_phys((unsigned long)stack), PROT_USER_RW) < 0) {
+        return -1;
+    }
+
+    if (t->user_stack != (void *)0) {
+        free(t->user_stack);
+    }
+    t->user_stack = stack;
+    t->pgd = pgd;
+    t->user_image_size = size;
+    return 0;
+}
+
 long process_fork(struct trap_frame *regs) {
     struct thread *parent = get_current();
     if (parent == (void *)0 || parent->kernel_stack == (void *)0 ||
-        regs == (void *)0) {
+        parent->pgd == (void *)0 || regs == (void *)0) {
         return -1;
     }
 
@@ -413,22 +464,9 @@ long process_fork(struct trap_frame *regs) {
         free(child);
         return -1;
     }
-    void *ustack = allocate(USER_STACK_SIZE);
-    if (ustack == (void *)0) {
-        free(kstack);
-        free(child);
-        return -1;
-    }
 
-    // The contents of the child’s kernel stack and user stack are identical to those of the parent
-    // but their memory addresses differ.
     memcpy(child, parent, sizeof(*child));
     memcpy(kstack, parent->kernel_stack, THREAD_STACK_SIZE);
-    if (parent->user_stack != (void *)0) {
-        memcpy(ustack, parent->user_stack, USER_STACK_SIZE);
-    } else {
-        memset(ustack, 0, USER_STACK_SIZE);
-    }
 
     child->pid = next_pid++;
     child->state = THREAD_RUNNING;
@@ -438,34 +476,48 @@ long process_fork(struct trap_frame *regs) {
     child->processing_signal = 0;
     child->signal_stack = (void *)0;
     child->kernel_stack = kstack;
-    child->user_stack = ustack;
     child->parent = parent;
+    child->pgd = vm_create_user_pgd();
+    child->user_stack = (void *)0;
     INIT_LIST_HEAD(&child->list);
     INIT_LIST_HEAD(&child->all_list);
-    /* Trap frame is copied to the child’s kernel stack, and all pointers
-    that originally referenced the parent’s stack must be redirected
-    to the corresponding locations in the child’s own stack.
-    */
-    // memcpy(kstack, parent->kernel_stack, THREAD_STACK_SIZE);
-    // Trap frame located at tf_off in the parent’s kernel stack is 
-    // also copied to the child’s kernel stack at the same offset.
+    if (child->pgd == (void *)0) {
+        free(kstack);
+        free(child);
+        return -1;
+    }
+
+    unsigned long mapped = (parent->user_image_size + VM_PAGE_SIZE - 1) &
+                           ~(VM_PAGE_SIZE - 1);
+    for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
+        unsigned long src_pa = vm_translate(parent->pgd, USER_TEXT_VA + off);
+        void *page = allocate(VM_PAGE_SIZE);
+        if (src_pa == 0 || page == (void *)0) {
+            return -1;
+        }
+        memcpy(page, (void *)phys_to_virt(src_pa & ~(VM_PAGE_SIZE - 1)),
+               VM_PAGE_SIZE);
+        if (vm_map_pages(child->pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
+                         virt_to_phys((unsigned long)page), PROT_USER_RX) < 0) {
+            return -1;
+        }
+    }
+
+    void *ustack = allocate(USER_STACK_SIZE);
+    if (ustack == (void *)0) {
+        return -1;
+    }
+    memcpy(ustack, parent->user_stack, USER_STACK_SIZE);
+    if (vm_map_pages(child->pgd, USER_STACK_PAGE_VA, USER_STACK_SIZE,
+                     virt_to_phys((unsigned long)ustack), PROT_USER_RW) < 0) {
+        return -1;
+    }
+    child->user_stack = ustack;
+
     uint64_t tf_off = (uint64_t)regs - (uint64_t)parent->kernel_stack;
     struct trap_frame *child_regs =
         (struct trap_frame *)((uint64_t)child->kernel_stack + tf_off);
-    /*
-    parent user stack                           child user stack
-    base = P_UBASE                              base = C_UBASE
-    |                                           |
-    |                                           |
-    | current user sp                           | child user sp
-    | offset = usp_off                          | offset = usp_off
-    |                                           |
-    +--------------------                       +--------------------
-    */
-    if (parent->user_stack != (void *)0) {
-        uint64_t usp_off = regs->x[TF_SP] - (uint64_t)parent->user_stack;
-        child_regs->x[TF_SP] = (uint64_t)child->user_stack + usp_off;
-    }
+    child_regs->x[TF_SP] = regs->x[TF_SP];
     child_regs->x[TF_A0] = 0;
     child->context.ra = (uint64_t)ret_from_exception;
     child->context.sp = (uint64_t)child_regs;
@@ -480,18 +532,10 @@ long process_fork(struct trap_frame *regs) {
 int process_exec_image(const void *image, unsigned long size) {
     struct thread *cur = get_current();
     if (cur == (void *)0 || cur->kernel_stack == (void *)0 ||
-        image == (void *)0 || size == 0 || size > USER_IMAGE_SIZE) {
+        install_user_image(cur, image, size) < 0) {
         return -1;
     }
-    if (cur->user_stack == (void *)0) {
-        cur->user_stack = allocate(USER_STACK_SIZE);
-        if (cur->user_stack == (void *)0) {
-            return -1;
-        }
-    }
 
-    memcpy((void *)USER_IMAGE_BASE, image, size);
-    memset(cur->user_stack, 0, USER_STACK_SIZE);
     struct trap_frame *regs = (struct trap_frame *)((uint64_t)cur->kernel_stack +
                                                     THREAD_STACK_SIZE -
                                                     sizeof(struct trap_frame));
@@ -502,35 +546,30 @@ int process_exec_image(const void *image, unsigned long size) {
         free(cur->signal_stack);
         cur->signal_stack = (void *)0;
     }
-    regs->x[TF_EPC] = USER_IMAGE_BASE;
-    regs->x[TF_SP] = (uint64_t)cur->user_stack + USER_STACK_SIZE;
+    regs->x[TF_EPC] = USER_TEXT_VA;
+    regs->x[TF_SP] = USER_STACK_TOP;
     regs->x[TF_STATUS] = (1UL << 5);
     cur->context.ra = (uint64_t)ret_from_exception;
     cur->context.sp = (uint64_t)regs;
+    vm_switch(cur->pgd);
     return 0;
 }
 
 int process_spawn_user(const void *image, unsigned long size) {
-    if (image == (void *)0 || size == 0 || size > USER_IMAGE_SIZE) {
-        return -1;
-    }
     struct thread *t = alloc_thread((void (*)(void))ret_from_exception);
-    if (t == (void *)0) {
-        return -1;
-    }
-    t->user_stack = allocate(USER_STACK_SIZE);
-    if (t->user_stack == (void *)0) {
-        free_thread(t);
+    if (t == (void *)0 || install_user_image(t, image, size) < 0) {
+        if (t != (void *)0) {
+            free_thread(t);
+        }
         return -1;
     }
     t->parent = get_current();
-    memcpy((void *)USER_IMAGE_BASE, image, size);
     struct trap_frame *regs = (struct trap_frame *)((uint64_t)t->kernel_stack +
                                                     THREAD_STACK_SIZE -
                                                     sizeof(struct trap_frame));
     memset(regs, 0, sizeof(*regs));
-    regs->x[TF_EPC] = USER_IMAGE_BASE;
-    regs->x[TF_SP] = (uint64_t)t->user_stack + USER_STACK_SIZE;
+    regs->x[TF_EPC] = USER_TEXT_VA;
+    regs->x[TF_SP] = USER_STACK_TOP;
     regs->x[TF_STATUS] = (1UL << 5);
     t->context.ra = (uint64_t)ret_from_exception;
     t->context.sp = (uint64_t)regs;
