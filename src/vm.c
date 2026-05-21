@@ -138,6 +138,73 @@ unsigned long vm_translate(unsigned long *pgd, unsigned long va) {
     return 0;
 }
 
+unsigned long *vm_get_pte(unsigned long *pgd, unsigned long va) {
+    unsigned long *table = pgd;
+    unsigned int shifts[2] = {PGD_SHIFT, PMD_SHIFT};
+
+    for (int level = 0; level < 2; level++) {
+        unsigned long pte = table[VPN(va, shifts[level])];
+        if ((pte & PTE_V) == 0 || (pte & (PTE_R | PTE_W | PTE_X)) != 0) {
+            return (void *)0;
+        }
+        table = (unsigned long *)phys_to_virt(pte_pa(pte));
+    }
+    return &table[VPN(va, PTE_SHIFT)];
+}
+
+static int clone_pt_level(unsigned long *dst, unsigned long *src, int level) {
+    for (int i = 0; i < VM_ENTRIES_PER_TABLE; i++) {
+        unsigned long entry = src[i];
+        if ((entry & PTE_V) == 0) {
+            continue;
+        }
+
+        if ((entry & (PTE_R | PTE_W | PTE_X)) != 0) {
+            if ((entry & PTE_U) == 0) {
+                continue;
+            }
+            if (entry & PTE_W) {
+                entry = (entry & ~PTE_W) | PTE_COW;
+                src[i] = entry;
+            }
+            inc_page_ref(addr_to_page(pte_pa(entry)));
+            dst[i] = entry;
+            continue;
+        }
+
+        unsigned long *child = alloc_page_table();
+        if (child == (void *)0) {
+            return -1;
+        }
+        dst[i] = MAKE_PTE(virt_to_phys((unsigned long)child), PTE_V);
+        if (clone_pt_level(child, (unsigned long *)phys_to_virt(pte_pa(entry)),
+                           level - 1) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int vm_clone_user_cow(unsigned long *dst, unsigned long *src) {
+    for (int i = 0; i < 256; i++) {
+        unsigned long entry = src[i];
+        if ((entry & PTE_V) == 0) {
+            continue;
+        }
+        unsigned long *child = alloc_page_table();
+        if (child == (void *)0) {
+            return -1;
+        }
+        dst[i] = MAKE_PTE(virt_to_phys((unsigned long)child), PTE_V);
+        if (clone_pt_level(child, (unsigned long *)phys_to_virt(pte_pa(entry)),
+                           1) < 0) {
+            return -1;
+        }
+    }
+    asm volatile("sfence.vma zero, zero" ::: "memory");
+    return 0;
+}
+
 void vm_switch(unsigned long *pgd) {
     if (pgd == (void *)0) {
         pgd = vm_kernel_pgd();

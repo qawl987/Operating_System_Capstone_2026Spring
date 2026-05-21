@@ -319,6 +319,19 @@ int get_page_chunk_size(int page_idx) {
     return 0;
 }
 
+void inc_page_ref(int page_idx) {
+    if (page_idx >= 0 && page_idx < (int)num_pages) {
+        mem_map[page_idx].refcount++;
+    }
+}
+
+int get_page_ref(int page_idx) {
+    if (page_idx >= 0 && page_idx < (int)num_pages) {
+        return mem_map[page_idx].refcount;
+    }
+    return 0;
+}
+
 /**
  * Reserve a memory region by
  * removing pages from free lists Algorithm: iterate from MAX_ORDER down to 0,

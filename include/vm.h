@@ -26,6 +26,7 @@
 #define PTE_G (1UL << 5)
 #define PTE_A (1UL << 6)
 #define PTE_D (1UL << 7)
+#define PTE_COW (1UL << 8)
 
 #define PROT_KERNEL (PTE_V | PTE_R | PTE_W | PTE_X | PTE_G | PTE_A | PTE_D)
 #define PROT_MMIO (PTE_V | PTE_R | PTE_W | PTE_G | PTE_A | PTE_D)
@@ -53,6 +54,8 @@ unsigned long *vm_create_user_pgd(void);
 int vm_map_pages(unsigned long *pgd, unsigned long va, unsigned long size,
                  unsigned long pa, unsigned long prot);
 unsigned long vm_translate(unsigned long *pgd, unsigned long va);
+unsigned long *vm_get_pte(unsigned long *pgd, unsigned long va);
+int vm_clone_user_cow(unsigned long *dst, unsigned long *src);
 void vm_switch(unsigned long *pgd);
 
 #endif /* VM_H */

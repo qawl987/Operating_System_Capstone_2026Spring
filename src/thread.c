@@ -1,5 +1,6 @@
 #include "thread.h"
 
+#include "buddy.h"
 #include "config.h"
 #include "framebuffer.h"
 #include "helper.h"
@@ -501,10 +502,6 @@ long process_mmap(void *addr, unsigned long length, int prot, int flags) {
 int process_handle_page_fault(unsigned long addr, unsigned long cause) {
     struct thread *cur = get_current();
     struct vm_area *vma = find_vma(cur, addr);
-    if (vma == (void *)0) {
-        return -1;
-    }
-
     int need = 0;
     if (cause == 12) {
         need = MMAP_PROT_EXEC;
@@ -513,11 +510,35 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
     } else if (cause == 15) {
         need = MMAP_PROT_WRITE;
     }
-    if ((vma->prot & need) == 0) {
-        return -1;
-    }
 
     unsigned long page_va = addr & ~(VM_PAGE_SIZE - 1);
+    unsigned long *pte = vm_get_pte(cur->pgd, page_va);
+    if (cause == 15 && pte != (void *)0 && (*pte & PTE_COW)) {
+        if (vma == (void *)0 || (vma->prot & MMAP_PROT_WRITE) == 0) {
+            return -1;
+        }
+        unsigned long old_pa = ((*pte >> 10) << 12);
+        int old_page = addr_to_page(old_pa);
+        printf("[Permission fault]: %x\n", page_va);
+        if (get_page_ref(old_page) > 1) {
+            void *page = allocate(VM_PAGE_SIZE);
+            if (page == (void *)0) {
+                return -1;
+            }
+            memcpy(page, (void *)phys_to_virt(old_pa), VM_PAGE_SIZE);
+            free_pages(old_page);
+            *pte = MAKE_PTE(virt_to_phys((unsigned long)page),
+                            ((*pte & 0x3ffUL) | PTE_W) & ~PTE_COW);
+        } else {
+            *pte = (*pte | PTE_W) & ~PTE_COW;
+        }
+        asm volatile("sfence.vma zero, zero" ::: "memory");
+        return 0;
+    }
+
+    if (vma == (void *)0 || (vma->prot & need) == 0) {
+        return -1;
+    }
     if (vm_translate(cur->pgd, page_va) != 0) {
         return -1;
     }
@@ -660,32 +681,12 @@ long process_fork(struct trap_frame *regs) {
         return -1;
     }
 
-    unsigned long mapped = (parent->user_image_size + VM_PAGE_SIZE - 1) &
-                           ~(VM_PAGE_SIZE - 1);
-    for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
-        unsigned long src_pa = vm_translate(parent->pgd, USER_TEXT_VA + off);
-        void *page = allocate(VM_PAGE_SIZE);
-        if (src_pa == 0 || page == (void *)0) {
-            return -1;
-        }
-        memcpy(page, (void *)phys_to_virt(src_pa & ~(VM_PAGE_SIZE - 1)),
-               VM_PAGE_SIZE);
-        if (vm_map_pages(child->pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
-                         virt_to_phys((unsigned long)page), PROT_USER_RX) < 0) {
-            return -1;
-        }
-    }
-
-    void *ustack = allocate(USER_STACK_SIZE);
-    if (ustack == (void *)0) {
+    if (vm_clone_user_cow(child->pgd, parent->pgd) < 0) {
+        free(kstack);
+        free(child);
         return -1;
     }
-    memcpy(ustack, parent->user_stack, USER_STACK_SIZE);
-    if (vm_map_pages(child->pgd, USER_STACK_PAGE_VA, USER_STACK_SIZE,
-                     virt_to_phys((unsigned long)ustack), PROT_USER_RW) < 0) {
-        return -1;
-    }
-    child->user_stack = ustack;
+    child->user_stack = (void *)0;
 
     uint64_t tf_off = (uint64_t)regs - (uint64_t)parent->kernel_stack;
     struct trap_frame *child_regs =

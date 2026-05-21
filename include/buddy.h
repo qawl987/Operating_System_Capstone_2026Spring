@@ -58,6 +58,8 @@ void set_page_chunk_size(int page_idx, int chunk_size);
 
 /* Get chunk size for a page (used by kfree) */
 int get_page_chunk_size(int page_idx);
+void inc_page_ref(int page_idx);
+int get_page_ref(int page_idx);
 
 /**
  * memory_reserve - Reserve a memory region
