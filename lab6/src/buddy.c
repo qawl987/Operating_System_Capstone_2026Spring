@@ -77,12 +77,8 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
         INIT_LIST_HEAD(&mem_map[i].list);
     }
 
-    /* Add only complete max-order blocks. Some real boards report a memory
-     * size that is not aligned to 4 MB; adding a partial tail as a full block
-     * would let later split/reserve code write past mem_map[].
-     */
-    for (i = 0; i + (1UL << MAX_ORDER) <= num_pages;
-         i += (1UL << MAX_ORDER)) {
+    /* Add all max-order blocks to the free list */
+    for (i = 0; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
         log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,
@@ -132,11 +128,8 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
         INIT_LIST_HEAD(&mem_map[i].list);
     }
 
-    /* Start with complete max-order blocks only. The unaligned tail stays
-     * unmanaged so free-list operations never reach beyond mem_map[].
-     */
-    for (i = 0; i + (1UL << MAX_ORDER) <= num_pages;
-         i += (1UL << MAX_ORDER)) {
+    /* Start with all memory free: add max-order blocks to free lists */
+    for (i = 0; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
         log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,

@@ -71,7 +71,8 @@ static inline uint64_t plic_priority_addr(uint32_t irq) {
 }
 
 static inline uint64_t plic_s_enable_addr(uint64_t hart) {
-    return phys_to_virt(PLIC_BASE + PLIC_S_ENABLE_BASE + (hart * 0x80UL));
+    return phys_to_virt(PLIC_BASE + PLIC_S_ENABLE_BASE +
+                        (hart * PLIC_S_ENABLE_HART_STRIDE));
 }
 
 static inline uint64_t plic_s_enable_word_addr(uint64_t hart, uint32_t irq) {
@@ -79,11 +80,13 @@ static inline uint64_t plic_s_enable_word_addr(uint64_t hart, uint32_t irq) {
 }
 
 static inline uint64_t plic_s_threshold_addr(uint64_t hart) {
-    return phys_to_virt(PLIC_BASE + PLIC_S_THRESHOLD_BASE + (hart * 0x2000UL));
+    return phys_to_virt(PLIC_BASE + PLIC_S_THRESHOLD_BASE +
+                        (hart * PLIC_S_CONTEXT_HART_STRIDE));
 }
 
 static inline uint64_t plic_s_claim_addr(uint64_t hart) {
-    return phys_to_virt(PLIC_BASE + PLIC_S_CLAIM_BASE + (hart * 0x2000UL));
+    return phys_to_virt(PLIC_BASE + PLIC_S_CLAIM_BASE +
+                        (hart * PLIC_S_CONTEXT_HART_STRIDE));
 }
 
 static void plic_init(void) {

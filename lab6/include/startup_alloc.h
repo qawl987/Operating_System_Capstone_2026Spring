@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 /* Maximum number of reserved regions we can track */
-#define MAX_RESERVED_REGIONS 16
+#define MAX_RESERVED_REGIONS 32
 
 /**
  * struct reserved_region - Describes a reserved memory region
