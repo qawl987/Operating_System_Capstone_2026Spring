@@ -6,12 +6,15 @@
  * Platform-specific addresses defined via preprocessor
  */
 #ifdef PLATFORM_QEMU
-    .equ RELOC_DEST, 0x84000000
-    .equ LOAD_BASE,  0x80200000
+    .equ RELOC_DEST,      0x84000000
+    .equ LOAD_BASE,       0x80200000
+    .equ KERNEL_BASE_PA,  0x80400000
 #else
-    .equ RELOC_DEST, 0x20000000
-    .equ LOAD_BASE,  0x00200000
+    .equ RELOC_DEST,      0x20000000
+    .equ LOAD_BASE,       0x00200000
+    .equ KERNEL_BASE_PA,  0x00400000
 #endif
+    .equ PAGE_OFFSET_ASM, 0xffffffc000000000
 
 _start:
     // === 1. Multi-core Check ===
@@ -26,11 +29,14 @@ _start:
 
     // Drop the temporary identity map while executing the boot code through
     // its higher-half alias, then return into the higher-half kernel entry.
-    li   t0, 0xffffffc000000000
-    li   sp, 0xffffffc080110000
+    li   t0, PAGE_OFFSET_ASM
+    lla  sp, boot_stack_top
+    add  sp, sp, t0
     mv   a0, s0
     add  a1, s1, t0
-    li   ra, 0xffffffc080400000
+    li   ra, PAGE_OFFSET_ASM
+    li   t2, KERNEL_BASE_PA
+    add  ra, ra, t2
     lla  t1, drop_identity_map
     add  t1, t1, t0
     jr   t1

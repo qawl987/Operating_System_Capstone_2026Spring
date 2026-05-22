@@ -161,7 +161,7 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     uart_puts("========================================\n\n");
 
     /* Initialize memory system using startup allocator */
-    startup_add_reserved(0x80100000UL, 0x10000UL);
+    startup_add_reserved(BOOT_PGTABLE_BASE, BOOT_PGTABLE_SIZE);
     startup_add_reserved(TEST_MEM_BASE, USER_IMAGE_SIZE);
     startup_add_reserved(FRAMEBUFFER_BASE, FRAMEBUFFER_SIZE);
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);

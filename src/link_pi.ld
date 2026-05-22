@@ -1,41 +1,57 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
-/* Orange Pi RV2 addresses */
+PAGE_OFFSET = 0xffffffc000000000;
+LOAD_ADDR = 0x00200000;
 RELOC_ADDR = 0x20000000;
 
 SECTIONS
 {
-    . = 0x00200000;
-    
-    _kernel_start = .;
+    . = LOAD_ADDR;
+    _boot_start = .;
     _load_start = .;
-    
-    .text : {
+
+    .text.boot : {
         *(.text.boot)
+    }
+
+    .data.boot : {
+        *(.data.boot)
+    }
+
+    .bss.boot : {
+        *(.bss.boot)
+    }
+
+    . = ALIGN(0x1000);
+    _boot_end = .;
+
+    . = PAGE_OFFSET + 0x00400000;
+    _kernel_start = .;
+
+    .text : AT(ADDR(.text) - PAGE_OFFSET) {
+        *(.text.entry)
         *(.text)
     }
-    
-    .rodata : { *(.rodata*) }
-    
-    .data : { *(.data) }
-    
-    .got : { *(.got) *(.got.plt) }
-    
-    .bss : {
+
+    .rodata : AT(ADDR(.rodata) - PAGE_OFFSET) { *(.rodata*) }
+
+    .data : AT(ADDR(.data) - PAGE_OFFSET) { *(.data) }
+
+    .got : AT(ADDR(.got) - PAGE_OFFSET) { *(.got) *(.got.plt) }
+
+    .bss : AT(ADDR(.bss) - PAGE_OFFSET) {
         __bss_start = .;
         *(.sbss) *(.bss)
         __bss_stop = .;
     }
-    
+
     . = ALIGN(16);
     _load_end = .;
-    
-    /* Stack space */
+
     . = . + 0x4000;
     _kernel_end = .;
     _end = .;
-    
-    /* Calculate size for relocation */
+
     _load_size = _load_end - _load_start;
 }

@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include "buddy.h"
+#include "config.h"
 #include "helper.h"
 #include "kmalloc.h"
 
@@ -9,8 +10,8 @@
 #define PTE_SHIFT 12
 #define VPN_MASK 0x1ffUL
 #define BOOT_LINEAR_GIB 8
-#define BOOT_PGD_PA 0x80100000UL
-#define BOOT_PMD_PA 0x80101000UL
+#define BOOT_PGD_PA BOOT_PGTABLE_BASE
+#define BOOT_PMD_PA (BOOT_PGTABLE_BASE + VM_PAGE_SIZE)
 #define VPN(va, shift) (unsigned int)(((va) >> (shift)) & VPN_MASK)
 
 static inline unsigned long pte_pa(unsigned long pte) {
@@ -19,6 +20,12 @@ static inline unsigned long pte_pa(unsigned long pte) {
 
 void setup_vm(void) __attribute__((section(".text.boot")));
 void drop_identity_map(void) __attribute__((section(".text.boot")));
+
+#ifdef PLATFORM_QEMU
+#define BOOT_MAP_PROT(pa) ((pa) < 0x40000000UL ? PROT_MMIO : PROT_KERNEL)
+#else
+#define BOOT_MAP_PROT(pa) ((pa) < DEFAULT_MEM_SIZE ? PROT_KERNEL : PROT_MMIO)
+#endif
 
 void setup_vm(void) {
     unsigned long *pgd = (unsigned long *)BOOT_PGD_PA;
@@ -34,30 +41,32 @@ void setup_vm(void) {
         unsigned long base = g * VM_PGD_SIZE;
         for (unsigned long p = 0; p < VM_ENTRIES_PER_TABLE; p++) {
             unsigned long pa = base + p * VM_PMD_SIZE;
-            unsigned long prot = pa < 0x40000000UL ? PROT_MMIO : PROT_KERNEL;
-            ((unsigned long (*)[VM_ENTRIES_PER_TABLE])BOOT_PMD_PA)[g][p] = MAKE_PTE(pa, prot);
+            unsigned long prot = BOOT_MAP_PROT(pa);
+            ((unsigned long (*)[VM_ENTRIES_PER_TABLE])BOOT_PMD_PA)[g][p] =
+                MAKE_PTE(pa, prot);
         }
 
-        ((unsigned long *)BOOT_PGD_PA)[VPN(base, PGD_SHIFT)] =
-            MAKE_PTE(BOOT_PMD_PA + g * VM_PAGE_SIZE, PTE_V);
-        ((unsigned long *)BOOT_PGD_PA)[256 + g] =
-            MAKE_PTE(BOOT_PMD_PA + g * VM_PAGE_SIZE, PTE_V);
+        unsigned long pmd_pa = BOOT_PMD_PA + g * VM_PAGE_SIZE;
+        pgd[VPN(base, PGD_SHIFT)] = MAKE_PTE(pmd_pa, PTE_V);
+        pgd[256 + g] = MAKE_PTE(pmd_pa, PTE_V);
     }
 
     asm volatile("li t0, 8\n"
                  "slli t0, t0, 60\n"
-                 "li t1, 0x80100\n"
+                 "li t1, %0\n"
+                 "srli t1, t1, 12\n"
                  "or t0, t0, t1\n"
                  "csrw satp, t0\n"
                  "sfence.vma zero, zero\n"
                  :
-                 :
+                 : "i"(BOOT_PGD_PA)
                  : "memory", "t0", "t1");
 }
 
 void drop_identity_map(void) {
+    unsigned long *pgd = (unsigned long *)(PAGE_OFFSET + BOOT_PGD_PA);
     for (unsigned long g = 0; g < BOOT_LINEAR_GIB; g++) {
-        ((unsigned long *)BOOT_PGD_PA)[VPN(g * VM_PGD_SIZE, PGD_SHIFT)] = 0;
+        pgd[VPN(g * VM_PGD_SIZE, PGD_SHIFT)] = 0;
     }
     asm volatile("sfence.vma zero, zero" ::: "memory");
 }
