@@ -613,10 +613,12 @@ static int install_user_image(struct thread *t, const void *image, unsigned long
             memcpy(page, (const char *)image + off, n);
         }
         if (vm_map_pages(pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
-                         virt_to_phys((unsigned long)page), PROT_USER_RX) < 0) {
+                         virt_to_phys((unsigned long)page), PROT_USER_RWX) < 0) {
             return -1;
         }
     }
+
+    asm volatile(".word 0x0000100f" ::: "memory");
 
     void *stack = allocate(USER_STACK_SIZE);
     if (stack == (void *)0) {
@@ -636,6 +638,12 @@ static int install_user_image(struct thread *t, const void *image, unsigned long
     t->user_image_size = size;
     t->mmap_next = USER_MMAP_BASE;
     t->vma_count = 0;
+    t->vmas[t->vma_count++] = (struct vm_area){
+        .start = USER_TEXT_VA,
+        .end = USER_TEXT_VA + mapped,
+        .prot = MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC,
+        .flags = MMAP_ANONYMOUS,
+    };
     t->vmas[t->vma_count++] = (struct vm_area){
         .start = USER_STACK_REGION_BASE,
         .end = USER_STACK_TOP,
