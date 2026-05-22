@@ -77,12 +77,8 @@ void buddy_init(unsigned long base_addr, unsigned long size) {
         INIT_LIST_HEAD(&mem_map[i].list);
     }
 
-    /* Add only complete max-order blocks. Some real boards report a memory
-     * size that is not aligned to 4 MB; adding a partial tail as a full block
-     * would let later split/reserve code write past mem_map[].
-     */
-    for (i = 0; i + (1UL << MAX_ORDER) <= num_pages;
-         i += (1UL << MAX_ORDER)) {
+    /* Add all max-order blocks to the free list */
+    for (i = 0; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
         log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,
@@ -132,11 +128,8 @@ void buddy_init_with_frame_array(unsigned long base_addr, unsigned long size,
         INIT_LIST_HEAD(&mem_map[i].list);
     }
 
-    /* Start with complete max-order blocks only. The unaligned tail stays
-     * unmanaged so free-list operations never reach beyond mem_map[].
-     */
-    for (i = 0; i + (1UL << MAX_ORDER) <= num_pages;
-         i += (1UL << MAX_ORDER)) {
+    /* Start with all memory free: add max-order blocks to free lists */
+    for (i = 0; i < num_pages; i += (1 << MAX_ORDER)) {
         mem_map[i].order = MAX_ORDER;
         list_add_tail(&mem_map[i].list, &free_area[MAX_ORDER]);
         log_spec("[+] Add page %d to order %d. Range: [%d, %d]\n", (int)i,
@@ -234,20 +227,9 @@ int alloc_pages(unsigned int order) {
  * Attempts to coalesce with buddy blocks
  */
 void free_pages(int page_idx) {
-    if (!page_index_valid(page_idx)) {
-        log_info("[!] free_pages: invalid page index %d\n", page_idx);
-        return;
-    }
-
     struct frame *page = &mem_map[page_idx];
     int current_order;
     int cur_idx = page_idx;
-
-    if (page->refcount <= 0) {
-        log_info("[!] free_pages: page %d has refcount %d\n", page_idx,
-                 page->refcount);
-        return;
-    }
 
     /* Decrease reference count */
     page->refcount--;
@@ -316,17 +298,7 @@ unsigned long page_to_addr(int page_idx) {
 /**
  * Get page index from physical address
  */
-int addr_to_page(unsigned long addr) {
-    unsigned long mem_end = mem_base + (unsigned long)num_pages * PAGE_SIZE;
-    if (addr < mem_base || addr >= mem_end) {
-        return -1;
-    }
-    return (int)((addr - mem_base) / PAGE_SIZE);
-}
-
-int page_index_valid(int page_idx) {
-    return page_idx >= 0 && page_idx < (int)num_pages;
-}
+int addr_to_page(unsigned long addr) { return (addr - mem_base) / PAGE_SIZE; }
 
 /**
  * Set chunk size for a page (used by kmalloc)
