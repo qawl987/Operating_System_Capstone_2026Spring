@@ -1,0 +1,11 @@
+*.elf
+*.o
+kernel.img
+kernel.bin
+kernel.fit
+kernel.elf
+qemu.dtb
+initramfs.cpio
+qemu_initrd.dtb
+x1_orangepi-rv2.dtb
+spec-and-plan/
