@@ -183,6 +183,10 @@ void kfree(void *ptr) {
     /* Calculate the page base address */
     page_base = virt_to_phys(addr) & ~(PAGE_SIZE - 1);
     page_idx = addr_to_page(page_base);
+    if (!page_index_valid(page_idx)) {
+        log_info("[!] kfree: pointer 0x%x is outside managed memory\n", addr);
+        return;
+    }
 
     /* Get chunk_size from the frame info */
     chunk_size = get_page_chunk_size(page_idx);

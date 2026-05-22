@@ -234,9 +234,20 @@ int alloc_pages(unsigned int order) {
  * Attempts to coalesce with buddy blocks
  */
 void free_pages(int page_idx) {
+    if (!page_index_valid(page_idx)) {
+        log_info("[!] free_pages: invalid page index %d\n", page_idx);
+        return;
+    }
+
     struct frame *page = &mem_map[page_idx];
     int current_order;
     int cur_idx = page_idx;
+
+    if (page->refcount <= 0) {
+        log_info("[!] free_pages: page %d has refcount %d\n", page_idx,
+                 page->refcount);
+        return;
+    }
 
     /* Decrease reference count */
     page->refcount--;
@@ -305,7 +316,17 @@ unsigned long page_to_addr(int page_idx) {
 /**
  * Get page index from physical address
  */
-int addr_to_page(unsigned long addr) { return (addr - mem_base) / PAGE_SIZE; }
+int addr_to_page(unsigned long addr) {
+    unsigned long mem_end = mem_base + (unsigned long)num_pages * PAGE_SIZE;
+    if (addr < mem_base || addr >= mem_end) {
+        return -1;
+    }
+    return (int)((addr - mem_base) / PAGE_SIZE);
+}
+
+int page_index_valid(int page_idx) {
+    return page_idx >= 0 && page_idx < (int)num_pages;
+}
 
 /**
  * Set chunk size for a page (used by kmalloc)

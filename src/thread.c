@@ -519,6 +519,9 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
         }
         unsigned long old_pa = ((*pte >> 10) << 12);
         int old_page = addr_to_page(old_pa);
+        if (!page_index_valid(old_page)) {
+            return -1;
+        }
         printf("[Permission fault]: %x\n", page_va);
         if (get_page_ref(old_page) > 1) {
             void *page = allocate(VM_PAGE_SIZE);

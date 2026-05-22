@@ -46,6 +46,7 @@ unsigned long page_to_addr(int page_idx);
 
 /* Get page index from physical address */
 int addr_to_page(unsigned long addr);
+int page_index_valid(int page_idx);
 
 /* Debug: dump free area status */
 void buddy_dump(void);
