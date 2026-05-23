@@ -594,7 +594,7 @@ static int install_user_image(struct thread *t, const void *image, unsigned long
     if (pgd == (void *)0) {
         return -1;
     }
-
+    // round up size to 4KB
     unsigned long mapped = (size + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
     for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
         void *page = allocate(VM_PAGE_SIZE);
