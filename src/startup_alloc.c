@@ -252,7 +252,8 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     startup_add_reserved(kernel_start, kernel_size);
 
     /* Reserve bootloader relocation area */
-    uint64_t reloc_size = virt_to_phys((uint64_t)_load_end) - (uint64_t)_load_start;
+    uint64_t reloc_size = virt_to_phys((uint64_t)_load_end) -
+                          virt_to_phys((uint64_t)_load_start);
     log_info("Reserving RELOC area: 0x%x - 0x%x\n", (uint64_t)RELOC_ADDR,
              (uint64_t)RELOC_ADDR + reloc_size);
     startup_add_reserved(RELOC_ADDR, reloc_size);

@@ -2,6 +2,7 @@
 #include "helper.h"
 #include "trap.h"
 #include "uart.h"
+#include "vm.h"
 #include <stdint.h>
 
 // Relocation function defined in start.S
@@ -9,7 +10,8 @@ extern void relocate_and_continue(void *dtb, void (*continue_func)(void *dtb));
 
 // Calculate function address in high memory
 #define HIGH_ADDR(func)                                                        \
-    ((void (*)(void *))(RELOC_ADDR + ((unsigned long)(func) - LOAD_ADDR)))
+    ((void (*)(void *))(phys_to_virt(RELOC_ADDR) +                            \
+                        (virt_to_phys((unsigned long)(func)) - LOAD_ADDR)))
 
 // Actual kernel loading function
 // This function is called from high memory after relocation
