@@ -16,6 +16,8 @@ struct vm_area {
     unsigned long end;
     int prot;
     int flags;
+    const void *backing;
+    unsigned long backing_size;
 };
 
 long process_mmap(void *addr, unsigned long length, int prot, int flags);

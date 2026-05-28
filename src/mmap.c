@@ -67,6 +67,37 @@ static int map_anonymous_page(struct thread *t, unsigned long va,
     return 0;
 }
 
+static int map_vma_page(struct thread *t, struct vm_area *vma,
+                        unsigned long page_va) {
+    void *page = allocate(VM_PAGE_SIZE);
+    if (page == (void *)0) {
+        return -1;
+    }
+    memset(page, 0, VM_PAGE_SIZE);
+
+    if (vma->backing != (void *)0) {
+        unsigned long off = page_va - vma->start;
+        if (off < vma->backing_size) {
+            unsigned long n = vma->backing_size - off;
+            if (n > VM_PAGE_SIZE) {
+                n = VM_PAGE_SIZE;
+            }
+            memcpy(page, (const char *)vma->backing + off, n);
+        }
+    }
+
+    if (vm_map_pages(t->pgd, page_va, VM_PAGE_SIZE,
+                     virt_to_phys((unsigned long)page),
+                     mmap_prot_to_pte(vma->prot)) < 0) {
+        free(page);
+        return -1;
+    }
+    if (vma->prot & MMAP_PROT_EXEC) {
+        asm volatile(".word 0x0000100f" ::: "memory");
+    }
+    return 0;
+}
+
 long process_mmap(void *addr, unsigned long length, int prot, int flags) {
     struct thread *cur = get_current();
     if (cur == (void *)0 || cur->pgd == (void *)0 || length == 0 ||
@@ -94,6 +125,8 @@ long process_mmap(void *addr, unsigned long length, int prot, int flags) {
     vma->end = va + size;
     vma->prot = prot;
     vma->flags = flags;
+    vma->backing = (void *)0;
+    vma->backing_size = 0;
 
     if (va + size > cur->mmap_next) {
         cur->mmap_next = va + size;
@@ -160,7 +193,7 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
     if (vm_translate(cur->pgd, page_va) != 0) {
         return -1;
     }
-    if (map_anonymous_page(cur, page_va, mmap_prot_to_pte(vma->prot)) < 0) {
+    if (map_vma_page(cur, vma, page_va) < 0) {
         return -1;
     }
     printf("[Translation fault]: %x\n", page_va);
@@ -178,44 +211,12 @@ int process_install_user_image(struct thread *t, const void *image,
     if (pgd == (void *)0) {
         return -1;
     }
-    // Align size to 4KB page boundary.
     unsigned long mapped = (size + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
-    for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
-        void *page = allocate(VM_PAGE_SIZE);
-        if (page == (void *)0) {
-            return -1;
-        }
-        memset(page, 0, VM_PAGE_SIZE);
-        if (off < size) {
-            unsigned long n = size - off;
-            if (n > VM_PAGE_SIZE) {
-                n = VM_PAGE_SIZE;
-            }
-            memcpy(page, (const char *)image + off, n);
-        }
-        // Map VA to PA page by page
-        if (vm_map_pages(pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
-                         virt_to_phys((unsigned long)page), PROT_USER_RWX) < 0) {
-            return -1;
-        }
-    }
-    // fence.i
-    asm volatile(".word 0x0000100f" ::: "memory");
-
-    void *stack = allocate(USER_STACK_SIZE);
-    if (stack == (void *)0) {
-        return -1;
-    }
-    memset(stack, 0, USER_STACK_SIZE);
-    if (vm_map_pages(pgd, USER_STACK_PAGE_VA, USER_STACK_SIZE,
-                     virt_to_phys((unsigned long)stack), PROT_USER_RW) < 0) {
-        return -1;
-    }
 
     if (t->user_stack != (void *)0) {
         free(t->user_stack);
     }
-    t->user_stack = stack;
+    t->user_stack = (void *)0;
     t->pgd = pgd;
     t->user_image_size = size;
     t->mmap_next = USER_MMAP_BASE;
@@ -225,12 +226,16 @@ int process_install_user_image(struct thread *t, const void *image,
         .end = USER_TEXT_VA + mapped,
         .prot = MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC,
         .flags = MMAP_ANONYMOUS,
+        .backing = image,
+        .backing_size = size,
     };
     t->vmas[t->vma_count++] = (struct vm_area){
         .start = USER_STACK_REGION_BASE,
         .end = USER_STACK_TOP,
         .prot = MMAP_PROT_READ | MMAP_PROT_WRITE,
         .flags = MMAP_ANONYMOUS,
+        .backing = (void *)0,
+        .backing_size = 0,
     };
     return 0;
 }
