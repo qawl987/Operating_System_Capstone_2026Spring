@@ -75,6 +75,7 @@ long process_mmap(void *addr, unsigned long length, int prot, int flags) {
     }
 
     unsigned long size = (length + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
+    // va = 0, !base <= va <= end, conflict
     unsigned long va = (unsigned long)addr;
     if (va == 0 || (va & (VM_PAGE_SIZE - 1)) != 0 ||
         va < USER_MMAP_BASE || va + size > USER_MMAP_END ||
@@ -122,6 +123,7 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
     }
 
     unsigned long page_va = addr & ~(VM_PAGE_SIZE - 1);
+    // work through PGD get PTE
     unsigned long *pte = vm_get_pte(cur->pgd, page_va);
     if (cause == 15 && pte != (void *)0 && (*pte & PTE_COW)) {
         if (vma == (void *)0 || (vma->prot & MMAP_PROT_WRITE) == 0) {
@@ -130,6 +132,7 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
         unsigned long old_pa = ((*pte >> 10) << 12);
         int old_page = addr_to_page(old_pa);
         printf("[Permission fault]: %x\n", page_va);
+        // share between process
         if (get_page_ref(old_page) > 1) {
             void *page = allocate(VM_PAGE_SIZE);
             if (page == (void *)0) {
@@ -137,18 +140,23 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
             }
             memcpy(page, (void *)phys_to_virt(old_pa), VM_PAGE_SIZE);
             free_pages(old_page);
+            // Update the current process's PTE to point to the new page,
+            // restore writability, and clear the PTE_COW flag.
             *pte = MAKE_PTE(virt_to_phys((unsigned long)page),
                             ((*pte & 0x3ffUL) | PTE_W) & ~PTE_COW);
         } else {
+            // no share, just change to writable
             *pte = (*pte | PTE_W) & ~PTE_COW;
         }
         asm volatile("sfence.vma zero, zero" ::: "memory");
         return 0;
     }
 
+    // page exist but prot & need not match
     if (vma == (void *)0 || (vma->prot & need) == 0) {
         return -1;
     }
+    // page exist but can't find pa
     if (vm_translate(cur->pgd, page_va) != 0) {
         return -1;
     }
@@ -165,11 +173,12 @@ int process_install_user_image(struct thread *t, const void *image,
         size > USER_IMAGE_SIZE) {
         return -1;
     }
-
+    // create user PGD, also copy kernel pgd for trap/syscall
     unsigned long *pgd = vm_create_user_pgd();
     if (pgd == (void *)0) {
         return -1;
     }
+    // Align size to 4KB page boundary.
     unsigned long mapped = (size + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
     for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
         void *page = allocate(VM_PAGE_SIZE);
@@ -184,12 +193,13 @@ int process_install_user_image(struct thread *t, const void *image,
             }
             memcpy(page, (const char *)image + off, n);
         }
+        // Map VA to PA page by page
         if (vm_map_pages(pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
                          virt_to_phys((unsigned long)page), PROT_USER_RWX) < 0) {
             return -1;
         }
     }
-
+    // fence.i
     asm volatile(".word 0x0000100f" ::: "memory");
 
     void *stack = allocate(USER_STACK_SIZE);

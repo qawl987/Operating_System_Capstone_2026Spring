@@ -110,13 +110,18 @@ void check_pending_signals(struct trap_frame *regs) {
         cur->pending_signals |= (1U << signum);
         return;
     }
-
+    // USER_SIGNAL_STACK_TOP
+    // tramp_user                -> tramp_kernel va
+    // ------
+    // USER_SIGNAL_STACK_PAGE_VA -> stack
     memcpy(&cur->backup_trap_frame, regs, sizeof(*regs));
     uint64_t tramp_user = (USER_SIGNAL_STACK_TOP - SIGNAL_TRAMPOLINE_SIZE) &
                           ~0xFUL;
     uint64_t tramp_kernel =
         (uint64_t)stack + (tramp_user - USER_SIGNAL_STACK_PAGE_VA);
     uint32_t *code = (uint32_t *)tramp_kernel;
+    // li a7, 11
+    // ecall
     code[0] = 0x00b00893U;
     code[1] = 0x00000073U;
     asm volatile(".word 0x0000100f" ::: "memory");

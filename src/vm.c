@@ -176,6 +176,7 @@ static int clone_pt_level(unsigned long *dst, unsigned long *src, int level) {
             if ((entry & PTE_U) == 0) {
                 continue;
             }
+            // If originally writable, clear PTE_W and set PTE_COW.
             if (entry & PTE_W) {
                 entry = (entry & ~PTE_W) | PTE_COW;
                 src[i] = entry;

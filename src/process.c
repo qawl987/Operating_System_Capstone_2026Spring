@@ -154,15 +154,19 @@ int process_exec_image(const void *image, unsigned long size) {
         process_install_user_image(cur, image, size) < 0) {
         return -1;
     }
-
+    // get kernel stack top, and get trap_frame start address
     struct trap_frame *regs = (struct trap_frame *)((uint64_t)cur->kernel_stack +
                                                     THREAD_STACK_SIZE -
                                                     sizeof(struct trap_frame));
     memset(regs, 0, sizeof(*regs));
     process_clear_signal_state();
     regs->x[TF_EPC] = USER_TEXT_VA;
+    // 8GB
     regs->x[TF_SP] = USER_STACK_TOP;
     regs->x[TF_STATUS] = (1UL << 5);
+    // cur->context.ra/sp ensures that when the scheduler context-switches 
+    // back to this thread, it can resume from the same trap frame and 
+    // return to user space via ret_from_exception.
     cur->context.ra = (uint64_t)ret_from_exception;
     cur->context.sp = (uint64_t)regs;
     vm_switch(cur->pgd);
