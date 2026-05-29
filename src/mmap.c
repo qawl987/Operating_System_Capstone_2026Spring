@@ -74,7 +74,7 @@ static int map_vma_page(struct thread *t, struct vm_area *vma,
         return -1;
     }
     memset(page, 0, VM_PAGE_SIZE);
-
+    // consist of user text(initrd image)
     if (vma->backing != (void *)0) {
         unsigned long off = page_va - vma->start;
         if (off < vma->backing_size) {
@@ -164,7 +164,7 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
         }
         unsigned long old_pa = ((*pte >> 10) << 12);
         int old_page = addr_to_page(old_pa);
-        printf("[Permission fault]: %x\n", page_va);
+        printf("[Permission fault]: %x\n", addr);
         // share between process
         if (get_page_ref(old_page) > 1) {
             void *page = allocate(VM_PAGE_SIZE);
@@ -196,7 +196,7 @@ int process_handle_page_fault(unsigned long addr, unsigned long cause) {
     if (map_vma_page(cur, vma, page_va) < 0) {
         return -1;
     }
-    printf("[Translation fault]: %x\n", page_va);
+    printf("[Translation fault]: %x\n", addr);
     return 0;
 }
 
