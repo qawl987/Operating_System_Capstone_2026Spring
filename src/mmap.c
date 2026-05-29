@@ -224,7 +224,7 @@ int process_install_user_image(struct thread *t, const void *image,
     t->vmas[t->vma_count++] = (struct vm_area){
         .start = USER_TEXT_VA,
         .end = USER_TEXT_VA + mapped,
-        .prot = MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC,
+        .prot = MMAP_PROT_READ | MMAP_PROT_EXEC,
         .flags = MMAP_ANONYMOUS,
         .backing = image,
         .backing_size = size,
