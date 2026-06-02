@@ -2,6 +2,9 @@
 
 #include "framebuffer.h"
 #include "initrd.h"
+#include "mmap.h"
+#include "process.h"
+#include "signal.h"
 #include "thread.h"
 #include "uart.h"
 

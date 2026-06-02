@@ -1,5 +1,8 @@
 #include "helper.h"
 #include "config.h"
+#include "mmap.h"
+#include "process.h"
+#include "signal.h"
 #include "syscall.h"
 #include "task.h"
 #include "thread.h"
@@ -154,8 +157,8 @@ static void handle_exception(unsigned long cause, struct pt_regs *regs) {
         return;
     }
 
-    if (regs != (void *)0 && (regs->status & SSTATUS_SPP) == 0 &&
-        is_page_fault(cause)) {
+    if (regs != (void *)0 && is_page_fault(cause) &&
+        regs->badvaddr < USER_STACK_TOP) {
         if (process_handle_page_fault(regs->badvaddr, cause) == 0) {
             return;
         }

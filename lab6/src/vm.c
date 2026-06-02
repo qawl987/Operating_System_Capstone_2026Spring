@@ -42,15 +42,18 @@ void setup_vm(void) {
         for (unsigned long p = 0; p < VM_ENTRIES_PER_TABLE; p++) {
             unsigned long pa = base + p * VM_PMD_SIZE;
             unsigned long prot = BOOT_MAP_PROT(pa);
+            // pointer point to array having 512 element
             ((unsigned long (*)[VM_ENTRIES_PER_TABLE])BOOT_PMD_PA)[g][p] =
                 MAKE_PTE(pa, prot);
         }
 
         unsigned long pmd_pa = BOOT_PMD_PA + g * VM_PAGE_SIZE;
+        // identity & kernel map
         pgd[VPN(base, PGD_SHIFT)] = MAKE_PTE(pmd_pa, PTE_V);
         pgd[256 + g] = MAKE_PTE(pmd_pa, PTE_V);
     }
 
+    // SATP = (MODE << 60 | PPN)
     asm volatile("li t0, 8\n"
                  "slli t0, t0, 60\n"
                  "li t1, %0\n"
@@ -90,6 +93,7 @@ unsigned long *vm_create_user_pgd(void) {
     if (pgd == (void *)0) {
         return (void *)0;
     }
+    // map kernel pgd to user pgd, so user switch, trap, syscall can work normally
     for (int i = 256; i < VM_ENTRIES_PER_TABLE; i++) {
         pgd[i] = kernel[i];
     }
@@ -172,6 +176,7 @@ static int clone_pt_level(unsigned long *dst, unsigned long *src, int level) {
             if ((entry & PTE_U) == 0) {
                 continue;
             }
+            // If originally writable, clear PTE_W and set PTE_COW.
             if (entry & PTE_W) {
                 entry = (entry & ~PTE_W) | PTE_COW;
                 src[i] = entry;

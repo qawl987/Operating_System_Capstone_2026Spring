@@ -8,11 +8,9 @@
 #ifdef PLATFORM_QEMU
     .equ RELOC_DEST,      0x84000000
     .equ LOAD_BASE,       0x80200000
-    .equ KERNEL_BASE_PA,  0x80400000
 #else
     .equ RELOC_DEST,      0x20000000
     .equ LOAD_BASE,       0x00200000
-    .equ KERNEL_BASE_PA,  0x00400000
 #endif
     .equ PAGE_OFFSET_ASM, 0xffffffc000000000
 
@@ -34,9 +32,8 @@ _start:
     add  sp, sp, t0
     mv   a0, s0
     add  a1, s1, t0
-    li   ra, PAGE_OFFSET_ASM
-    li   t2, KERNEL_BASE_PA
-    add  ra, ra, t2
+    lla  ra, kernel_entry
+    add  ra, ra, t0
     lla  t1, drop_identity_map
     add  t1, t1, t0
     jr   t1
@@ -184,6 +181,8 @@ relocate_and_continue:
     la   t0, _load_start     // Source start (PC-relative)
     la   t1, _load_end       // Source end
     li   t2, RELOC_DEST      // Destination
+    li   t4, PAGE_OFFSET_ASM
+    add  t2, t2, t4
 
 copy_loop:
     bgeu t0, t1, copy_done

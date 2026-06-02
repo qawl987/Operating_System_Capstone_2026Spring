@@ -1,27 +1,15 @@
 #include "thread.h"
 
-#include "buddy.h"
-#include "config.h"
-#include "framebuffer.h"
 #include "helper.h"
 #include "kmalloc.h"
-#include "uart.h"
+#include "process.h"
 #include "vm.h"
-
-extern void ret_from_exception(void);
 
 static LIST_HEAD(run_queue);
 static LIST_HEAD(zombie_queue);
 static LIST_HEAD(all_threads);
 static struct thread *idle_thread;
 static int next_pid = 1;
-
-#define TF_SP 1
-#define TF_RA 0
-#define TF_A0 9
-#define TF_EPC 31
-#define TF_STATUS 32
-#define SIGNAL_TRAMPOLINE_SIZE 16UL
 
 static inline unsigned long irq_save(void) {
     unsigned long s;
@@ -38,7 +26,81 @@ static inline void irq_restore(unsigned long s) {
     }
 }
 
-static struct thread *alloc_thread(void (*func)(void)) {
+int thread_alloc_pid(void) {
+    return next_pid++;
+}
+
+int thread_is_idle(struct thread *t) {
+    return t == idle_thread;
+}
+
+uint64_t thread_rdtime(void) {
+    uint64_t t;
+    asm volatile("rdtime %0" : "=r"(t));
+    return t;
+}
+
+void thread_add_to_all(struct thread *t) {
+    if (t == (void *)0) {
+        return;
+    }
+    unsigned long irq_state = irq_save();
+    list_add_tail(&t->all_list, &all_threads);
+    irq_restore(irq_state);
+}
+
+void thread_make_runnable(struct thread *t) {
+    if (t == (void *)0 || t == idle_thread) {
+        return;
+    }
+    unsigned long irq_state = irq_save();
+    if (list_empty(&t->list)) {
+        list_add_tail(&t->list, &run_queue);
+    }
+    irq_restore(irq_state);
+}
+
+void thread_make_zombie(struct thread *t) {
+    if (t == (void *)0 || t == idle_thread) {
+        return;
+    }
+    unsigned long irq_state = irq_save();
+    if (!list_empty(&t->list)) {
+        list_del_init(&t->list);
+    }
+    list_add_tail(&t->list, &zombie_queue);
+    irq_restore(irq_state);
+}
+
+struct thread *thread_find(int pid) {
+    struct list_head *pos = (void *)0;
+    list_for_each(pos, &all_threads) {
+        struct thread *t = list_entry(pos, struct thread, all_list);
+        if (t->pid == pid) {
+            return t;
+        }
+    }
+    return (void *)0;
+}
+
+struct thread *thread_find_zombie_child(long pid) {
+    struct list_head *pos = (void *)0;
+    list_for_each(pos, &all_threads) {
+        struct thread *t = list_entry(pos, struct thread, all_list);
+        if (t->parent != get_current()) {
+            continue;
+        }
+        if (pid >= 0 && t->pid != pid) {
+            continue;
+        }
+        if (t->state == THREAD_ZOMBIE) {
+            return t;
+        }
+    }
+    return (void *)0;
+}
+
+struct thread *thread_alloc(void (*func)(void)) {
     struct thread *t = (struct thread *)allocate(sizeof(struct thread));
     if (t == (void *)0) {
         return (void *)0;
@@ -50,17 +112,11 @@ static struct thread *alloc_thread(void (*func)(void)) {
     }
 
     memset(t, 0, sizeof(*t));
-
-    t->pid = next_pid++;
+    t->pid = thread_alloc_pid();
     t->state = THREAD_RUNNING;
-    t->exit_code = 0;
-    t->wake_time = 0;
     t->kernel_stack = stack;
-    t->user_stack = (void *)0;
     t->pgd = vm_kernel_pgd();
-    t->user_image_size = 0;
     t->mmap_next = USER_MMAP_BASE;
-    t->vma_count = 0;
     t->entry = func;
     t->parent = get_current();
     INIT_LIST_HEAD(&t->list);
@@ -70,13 +126,11 @@ static struct thread *alloc_thread(void (*func)(void)) {
     stack_top -= sizeof(struct trap_frame);
     t->context.sp = stack_top;
     t->context.ra = (uint64_t)func;
-    unsigned long irq_state = irq_save();
-    list_add_tail(&t->all_list, &all_threads);
-    irq_restore(irq_state);
+    thread_add_to_all(t);
     return t;
 }
 
-static void free_thread(struct thread *t) {
+void thread_free(struct thread *t) {
     if (t == (void *)0 || t == idle_thread || t == get_current()) {
         return;
     }
@@ -98,49 +152,24 @@ static void free_thread(struct thread *t) {
     free(t);
 }
 
-static int is_child_of_current(struct thread *t) {
-    return t != (void *)0 && t->parent == get_current();
-}
-
-struct thread *thread_find(int pid) {
-    struct list_head *pos = (void *)0;
-    list_for_each(pos, &all_threads) {
-        struct thread *t = list_entry(pos, struct thread, all_list);
-        if (t->pid == pid) {
-            return t;
-        }
-    }
-    return (void *)0;
-}
-
 void thread_system_init(void) {
     struct thread *boot = (struct thread *)allocate(sizeof(struct thread));
     if (boot == (void *)0) {
         return;
     }
     memset(boot, 0, sizeof(*boot));
-    boot->pid = next_pid++;
+    boot->pid = thread_alloc_pid();
     boot->state = THREAD_RUNNING;
-    boot->exit_code = 0;
-    boot->wake_time = 0;
-    boot->kernel_stack = (void *)0;
-    boot->user_stack = (void *)0;
     boot->pgd = vm_kernel_pgd();
-    boot->user_image_size = 0;
     boot->mmap_next = USER_MMAP_BASE;
-    boot->vma_count = 0;
-    boot->entry = (void *)0;
-    boot->parent = (void *)0;
     INIT_LIST_HEAD(&boot->list);
     INIT_LIST_HEAD(&boot->all_list);
-    unsigned long irq_state = irq_save();
-    list_add_tail(&boot->all_list, &all_threads);
-    irq_restore(irq_state);
+    thread_add_to_all(boot);
     asm volatile("mv tp, %0" : : "r"(boot));
 
-    idle_thread = alloc_thread(idle);
+    idle_thread = thread_alloc(idle);
     if (idle_thread != (void *)0) {
-        irq_state = irq_save();
+        unsigned long irq_state = irq_save();
         list_add_tail(&idle_thread->list, &run_queue);
         irq_restore(irq_state);
     }
@@ -150,14 +179,12 @@ struct thread *thread_create(void (*func)(void)) {
     if (func == (void *)0) {
         return (void *)0;
     }
-    struct thread *t = alloc_thread(func);
+    struct thread *t = thread_alloc(func);
     if (t == (void *)0) {
         return (void *)0;
     }
     t->parent = (void *)0;
-    unsigned long irq_state = irq_save();
-    list_add_tail(&t->list, &run_queue);
-    irq_restore(irq_state);
+    thread_make_runnable(t);
     return t;
 }
 
@@ -173,7 +200,6 @@ void schedule(void) {
         list_add_tail(&prev->list, &zombie_queue);
     }
 
-    // Take next in run_queue, otherwise run idle function
     if (!list_empty(&run_queue)) {
         next = list_first_entry(&run_queue, struct thread, list);
         list_del_init(&next->list);
@@ -197,378 +223,6 @@ void thread_exit(void) {
     process_exit(0);
 }
 
-void process_exit(int status) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0) {
-        return;
-    }
-    cur->exit_code = status;
-    cur->state = THREAD_ZOMBIE;
-    schedule();
-    while (1) {
-        asm volatile("wfi");
-    }
-}
-
-// Check t->parent == current to free child thread
-long process_waitpid(long pid) {
-    while (1) {
-        struct list_head *pos = (void *)0;
-        list_for_each(pos, &all_threads) {
-            struct thread *t = list_entry(pos, struct thread, all_list);
-            if (!is_child_of_current(t)) {
-                continue;
-            }
-            if (pid >= 0 && t->pid != pid) {
-                continue;
-            }
-            if (t->state == THREAD_ZOMBIE) {
-                long ret = t->pid;
-                printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
-                free_thread(t);
-                return ret;
-            }
-        }
-
-        if (pid >= 0) {
-            struct thread *target = thread_find((int)pid);
-            if (target == (void *)0 || target->parent != get_current()) {
-                return -1;
-            }
-        }
-        schedule();
-    }
-}
-
-int process_stop(long pid) {
-    struct thread *target = thread_find((int)pid);
-    if (target == (void *)0 || target == idle_thread || target->state == THREAD_ZOMBIE) {
-        return -1;
-    }
-    if (target == get_current()) {
-        process_exit(0);
-        return 0;
-    }
-    target->state = THREAD_ZOMBIE;
-    target->parent = (void *)0;
-    printf("[INFO] Killing zombie thread with PID: %d\n", target->pid);
-    unsigned long irq_state = irq_save();
-    if (!list_empty(&target->list)) {
-        list_del_init(&target->list);
-    }
-    list_add_tail(&target->list, &zombie_queue);
-    irq_restore(irq_state);
-    return 0;
-}
-
-long process_signal(int signum, void (*handler)(void)) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0 || signum < 0 || signum >= SIGNAL_MAX) {
-        return -1;
-    }
-    void (*old)(void) = cur->signal_handlers[signum];
-    cur->signal_handlers[signum] = handler;
-    return (long)old;
-}
-
-void process_sigreturn(struct trap_frame *regs) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0 || regs == (void *)0 || !cur->processing_signal) {
-        return;
-    }
-
-    printf("[INFO] SIGRETURN is called!\n");
-    void *stack = cur->signal_stack;
-    memcpy(regs, &cur->backup_trap_frame, sizeof(*regs));
-    cur->processing_signal = 0;
-    cur->signal_stack = (void *)0;
-    if (stack != (void *)0) {
-        free(stack);
-    }
-}
-
-long process_kill(int pid, int signum) {
-    if (signum < 0 || signum >= SIGNAL_MAX) {
-        return -1;
-    }
-    struct thread *target = thread_find(pid);
-    if (target == (void *)0 || target == idle_thread ||
-        target->state == THREAD_ZOMBIE) {
-        return -1;
-    }
-    if (target->signal_handlers[signum] == (void *)0) {
-        return process_stop(pid);
-    }
-
-    target->pending_signals |= (1U << signum);
-    if (target->state == THREAD_SLEEPING) {
-        target->state = THREAD_RUNNING;
-        target->wake_time = 0;
-        unsigned long irq_state = irq_save();
-        if (list_empty(&target->list)) {
-            list_add_tail(&target->list, &run_queue);
-        }
-        irq_restore(irq_state);
-    }
-    return 0;
-}
-
-void check_pending_signals(struct trap_frame *regs) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0 || regs == (void *)0 ||
-        cur->state != THREAD_RUNNING || cur->processing_signal ||
-        cur->pending_signals == 0) {
-        return;
-    }
-
-    int signum = -1;
-    for (int i = 0; i < SIGNAL_MAX; i++) {
-        if ((cur->pending_signals & (1U << i)) != 0) {
-            signum = i;
-            break;
-        }
-    }
-    if (signum < 0) {
-        return;
-    }
-
-    void (*handler)(void) = cur->signal_handlers[signum];
-    cur->pending_signals &= ~(1U << signum);
-    if (handler == (void *)0) {
-        process_exit(0);
-        return;
-    }
-
-    void *stack = allocate(USER_STACK_SIZE);
-    if (stack == (void *)0) {
-        cur->pending_signals |= (1U << signum);
-        return;
-    }
-    memset(stack, 0, USER_STACK_SIZE);
-    /*
-     * The allocated stack pointer is a kernel higher-half VA. User mode cannot
-     * access that address directly, so map the same physical page into this
-     * process's user page table at a fixed signal-stack VA.
-     *
-     * The trampoline lives on this page too. It must be executable because the
-     * signal handler returns to it through ra, then the trampoline issues the
-     * sigreturn syscall to restore the saved trap frame.
-     */
-    if (vm_map_pages(cur->pgd, USER_SIGNAL_STACK_PAGE_VA, USER_STACK_SIZE,
-                     virt_to_phys((unsigned long)stack), PROT_USER_RWX) < 0) {
-        free(stack);
-        cur->pending_signals |= (1U << signum);
-        return;
-    }
-
-    memcpy(&cur->backup_trap_frame, regs, sizeof(*regs));
-    /*
-     * Put the trampoline at the top of the user-visible signal stack and keep it
-     * 16-byte aligned for the user ABI. tramp_user is written into the trap
-     * frame, while tramp_kernel is the kernel alias used to copy the actual
-     * trampoline instructions into the backing physical page.
-     */
-    uint64_t tramp_user = (USER_SIGNAL_STACK_TOP - SIGNAL_TRAMPOLINE_SIZE) &
-                          ~0xFUL;
-    uint64_t tramp_kernel =
-        (uint64_t)stack + (tramp_user - USER_SIGNAL_STACK_PAGE_VA);
-    uint32_t *code = (uint32_t *)tramp_kernel;
-    code[0] = 0x00b00893U;
-    code[1] = 0x00000073U;
-    // fence.i drop cache
-    asm volatile(".word 0x0000100f" ::: "memory");
-
-    cur->signal_stack = stack;
-    cur->processing_signal = 1;
-    regs->x[TF_EPC] = (uint64_t)handler;
-    regs->x[TF_SP] = tramp_user;
-    regs->x[TF_RA] = tramp_user;
-}
-
-static uint64_t rdtime(void) {
-    uint64_t t;
-    asm volatile("rdtime %0" : "=r"(t));
-    return t;
-}
-
-#define MMAP_PROT_READ 1
-#define MMAP_PROT_WRITE 2
-#define MMAP_PROT_EXEC 4
-#define MMAP_ANONYMOUS 0x20
-#define MMAP_POPULATE 0x8000
-
-static unsigned long mmap_prot_to_pte(int prot) {
-    unsigned long pte = PROT_USER_BASE;
-
-    if (prot & MMAP_PROT_READ) {
-        pte |= PTE_R;
-    }
-    if (prot & MMAP_PROT_WRITE) {
-        pte |= PTE_W;
-        if (prot & MMAP_PROT_READ) {
-            pte |= PTE_R;
-        }
-    }
-    if (prot & MMAP_PROT_EXEC) {
-        pte |= PTE_X;
-    }
-    return pte;
-}
-
-static int vma_ranges_overlap(unsigned long a_start, unsigned long a_end,
-                              unsigned long b_start, unsigned long b_end) {
-    return a_start < b_end && b_start < a_end;
-}
-
-static struct vm_area *find_vma(struct thread *t, unsigned long addr) {
-    if (t == (void *)0) {
-        return (void *)0;
-    }
-    for (int i = 0; i < t->vma_count; i++) {
-        if (addr >= t->vmas[i].start && addr < t->vmas[i].end) {
-            return &t->vmas[i];
-        }
-    }
-    return (void *)0;
-}
-
-static int vma_conflicts(struct thread *t, unsigned long start,
-                         unsigned long end) {
-    for (int i = 0; i < t->vma_count; i++) {
-        if (vma_ranges_overlap(start, end, t->vmas[i].start, t->vmas[i].end)) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int map_anonymous_page(struct thread *t, unsigned long va,
-                              unsigned long pte_prot) {
-    void *page = allocate(VM_PAGE_SIZE);
-    if (page == (void *)0) {
-        return -1;
-    }
-    memset(page, 0, VM_PAGE_SIZE);
-    if (vm_map_pages(t->pgd, va, VM_PAGE_SIZE,
-                     virt_to_phys((unsigned long)page), pte_prot) < 0) {
-        free(page);
-        return -1;
-    }
-    return 0;
-}
-
-long process_mmap(void *addr, unsigned long length, int prot, int flags) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0 || cur->pgd == (void *)0 || length == 0 ||
-        (flags & MMAP_ANONYMOUS) == 0 || cur->vma_count >= MAX_VMA_REGIONS) {
-        return -1;
-    }
-
-    unsigned long size = (length + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
-    unsigned long va = (unsigned long)addr;
-    if (va == 0 || (va & (VM_PAGE_SIZE - 1)) != 0 ||
-        va < USER_MMAP_BASE || va + size > USER_MMAP_END ||
-        vma_conflicts(cur, va, va + size)) {
-        va = cur->mmap_next;
-        while (va + size <= USER_MMAP_END && vma_conflicts(cur, va, va + size)) {
-            va += size;
-        }
-    }
-    if (va + size > USER_MMAP_END) {
-        return -1;
-    }
-
-    struct vm_area *vma = &cur->vmas[cur->vma_count++];
-    vma->start = va;
-    vma->end = va + size;
-    vma->prot = prot;
-    vma->flags = flags;
-
-    if (va + size > cur->mmap_next) {
-        cur->mmap_next = va + size;
-    }
-
-    if (flags & MMAP_POPULATE) {
-        unsigned long pte_prot = mmap_prot_to_pte(prot);
-        for (unsigned long off = 0; off < size; off += VM_PAGE_SIZE) {
-            if (map_anonymous_page(cur, va + off, pte_prot) < 0) {
-                return -1;
-            }
-        }
-    }
-    return (long)va;
-}
-
-int process_handle_page_fault(unsigned long addr, unsigned long cause) {
-    struct thread *cur = get_current();
-    struct vm_area *vma = find_vma(cur, addr);
-    int need = 0;
-    if (cause == 12) {
-        need = MMAP_PROT_EXEC;
-    } else if (cause == 13) {
-        need = MMAP_PROT_READ;
-    } else if (cause == 15) {
-        need = MMAP_PROT_WRITE;
-    }
-
-    unsigned long page_va = addr & ~(VM_PAGE_SIZE - 1);
-    unsigned long *pte = vm_get_pte(cur->pgd, page_va);
-    if (cause == 15 && pte != (void *)0 && (*pte & PTE_COW)) {
-        if (vma == (void *)0 || (vma->prot & MMAP_PROT_WRITE) == 0) {
-            return -1;
-        }
-        unsigned long old_pa = ((*pte >> 10) << 12);
-        int old_page = addr_to_page(old_pa);
-        printf("[Permission fault]: %x\n", page_va);
-        if (get_page_ref(old_page) > 1) {
-            void *page = allocate(VM_PAGE_SIZE);
-            if (page == (void *)0) {
-                return -1;
-            }
-            memcpy(page, (void *)phys_to_virt(old_pa), VM_PAGE_SIZE);
-            free_pages(old_page);
-            *pte = MAKE_PTE(virt_to_phys((unsigned long)page),
-                            ((*pte & 0x3ffUL) | PTE_W) & ~PTE_COW);
-        } else {
-            *pte = (*pte | PTE_W) & ~PTE_COW;
-        }
-        asm volatile("sfence.vma zero, zero" ::: "memory");
-        return 0;
-    }
-
-    if (vma == (void *)0 || (vma->prot & need) == 0) {
-        return -1;
-    }
-    if (vm_translate(cur->pgd, page_va) != 0) {
-        return -1;
-    }
-    if (map_anonymous_page(cur, page_va, mmap_prot_to_pte(vma->prot)) < 0) {
-        return -1;
-    }
-    printf("[Translation fault]: %x\n", page_va);
-    return 0;
-}
-
-long process_usleep(unsigned int usec) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0) {
-        return -1;
-    }
-    if (usec == 0) {
-        schedule();
-        return 0;
-    }
-
-    uint64_t delay = ((uint64_t)usec * TIMER_TICK_HZ) / 1000000ULL;
-    if (delay == 0) {
-        delay = 1;
-    }
-    cur->wake_time = rdtime() + delay;
-    cur->state = THREAD_SLEEPING;
-    schedule();
-    return 0;
-}
-
 void thread_wake_sleepers(uint64_t now) {
     struct list_head *pos = (void *)0;
     unsigned long irq_state = irq_save();
@@ -583,182 +237,6 @@ void thread_wake_sleepers(uint64_t now) {
         }
     }
     irq_restore(irq_state);
-}
-
-static int install_user_image(struct thread *t, const void *image, unsigned long size) {
-    if (t == (void *)0 || image == (void *)0 || size == 0 || size > USER_IMAGE_SIZE) {
-        return -1;
-    }
-
-    unsigned long *pgd = vm_create_user_pgd();
-    if (pgd == (void *)0) {
-        return -1;
-    }
-
-    unsigned long mapped = (size + VM_PAGE_SIZE - 1) & ~(VM_PAGE_SIZE - 1);
-    for (unsigned long off = 0; off < mapped; off += VM_PAGE_SIZE) {
-        void *page = allocate(VM_PAGE_SIZE);
-        if (page == (void *)0) {
-            return -1;
-        }
-        memset(page, 0, VM_PAGE_SIZE);
-        if (off < size) {
-            unsigned long n = size - off;
-            if (n > VM_PAGE_SIZE) {
-                n = VM_PAGE_SIZE;
-            }
-            memcpy(page, (const char *)image + off, n);
-        }
-        if (vm_map_pages(pgd, USER_TEXT_VA + off, VM_PAGE_SIZE,
-                         virt_to_phys((unsigned long)page), PROT_USER_RWX) < 0) {
-            return -1;
-        }
-    }
-
-    asm volatile(".word 0x0000100f" ::: "memory");
-
-    void *stack = allocate(USER_STACK_SIZE);
-    if (stack == (void *)0) {
-        return -1;
-    }
-    memset(stack, 0, USER_STACK_SIZE);
-    if (vm_map_pages(pgd, USER_STACK_PAGE_VA, USER_STACK_SIZE,
-                     virt_to_phys((unsigned long)stack), PROT_USER_RW) < 0) {
-        return -1;
-    }
-
-    if (t->user_stack != (void *)0) {
-        free(t->user_stack);
-    }
-    t->user_stack = stack;
-    t->pgd = pgd;
-    t->user_image_size = size;
-    t->mmap_next = USER_MMAP_BASE;
-    t->vma_count = 0;
-    t->vmas[t->vma_count++] = (struct vm_area){
-        .start = USER_TEXT_VA,
-        .end = USER_TEXT_VA + mapped,
-        .prot = MMAP_PROT_READ | MMAP_PROT_WRITE | MMAP_PROT_EXEC,
-        .flags = MMAP_ANONYMOUS,
-    };
-    t->vmas[t->vma_count++] = (struct vm_area){
-        .start = USER_STACK_REGION_BASE,
-        .end = USER_STACK_TOP,
-        .prot = MMAP_PROT_READ | MMAP_PROT_WRITE,
-        .flags = MMAP_ANONYMOUS,
-    };
-    return 0;
-}
-
-long process_fork(struct trap_frame *regs) {
-    struct thread *parent = get_current();
-    if (parent == (void *)0 || parent->kernel_stack == (void *)0 ||
-        parent->pgd == (void *)0 || regs == (void *)0) {
-        return -1;
-    }
-
-    struct thread *child = (struct thread *)allocate(sizeof(struct thread));
-    if (child == (void *)0) {
-        return -1;
-    }
-    void *kstack = allocate(THREAD_STACK_SIZE);
-    if (kstack == (void *)0) {
-        free(child);
-        return -1;
-    }
-
-    memcpy(child, parent, sizeof(*child));
-    memcpy(kstack, parent->kernel_stack, THREAD_STACK_SIZE);
-
-    child->pid = next_pid++;
-    child->state = THREAD_RUNNING;
-    child->exit_code = 0;
-    child->wake_time = 0;
-    child->pending_signals = 0;
-    child->processing_signal = 0;
-    child->signal_stack = (void *)0;
-    child->kernel_stack = kstack;
-    child->parent = parent;
-    child->pgd = vm_create_user_pgd();
-    child->user_stack = (void *)0;
-    INIT_LIST_HEAD(&child->list);
-    INIT_LIST_HEAD(&child->all_list);
-    if (child->pgd == (void *)0) {
-        free(kstack);
-        free(child);
-        return -1;
-    }
-
-    if (vm_clone_user_cow(child->pgd, parent->pgd) < 0) {
-        free(kstack);
-        free(child);
-        return -1;
-    }
-    child->user_stack = (void *)0;
-
-    uint64_t tf_off = (uint64_t)regs - (uint64_t)parent->kernel_stack;
-    struct trap_frame *child_regs =
-        (struct trap_frame *)((uint64_t)child->kernel_stack + tf_off);
-    child_regs->x[TF_SP] = regs->x[TF_SP];
-    child_regs->x[TF_A0] = 0;
-    child->context.ra = (uint64_t)ret_from_exception;
-    child->context.sp = (uint64_t)child_regs;
-
-    unsigned long irq_state = irq_save();
-    list_add_tail(&child->all_list, &all_threads);
-    list_add_tail(&child->list, &run_queue);
-    irq_restore(irq_state);
-    return child->pid;
-}
-
-int process_exec_image(const void *image, unsigned long size) {
-    struct thread *cur = get_current();
-    if (cur == (void *)0 || cur->kernel_stack == (void *)0 ||
-        install_user_image(cur, image, size) < 0) {
-        return -1;
-    }
-
-    struct trap_frame *regs = (struct trap_frame *)((uint64_t)cur->kernel_stack +
-                                                    THREAD_STACK_SIZE -
-                                                    sizeof(struct trap_frame));
-    memset(regs, 0, sizeof(*regs));
-    cur->pending_signals = 0;
-    cur->processing_signal = 0;
-    if (cur->signal_stack != (void *)0) {
-        free(cur->signal_stack);
-        cur->signal_stack = (void *)0;
-    }
-    regs->x[TF_EPC] = USER_TEXT_VA;
-    regs->x[TF_SP] = USER_STACK_TOP;
-    regs->x[TF_STATUS] = (1UL << 5);
-    cur->context.ra = (uint64_t)ret_from_exception;
-    cur->context.sp = (uint64_t)regs;
-    vm_switch(cur->pgd);
-    return 0;
-}
-
-int process_spawn_user(const void *image, unsigned long size) {
-    struct thread *t = alloc_thread((void (*)(void))ret_from_exception);
-    if (t == (void *)0 || install_user_image(t, image, size) < 0) {
-        if (t != (void *)0) {
-            free_thread(t);
-        }
-        return -1;
-    }
-    t->parent = get_current();
-    struct trap_frame *regs = (struct trap_frame *)((uint64_t)t->kernel_stack +
-                                                    THREAD_STACK_SIZE -
-                                                    sizeof(struct trap_frame));
-    memset(regs, 0, sizeof(*regs));
-    regs->x[TF_EPC] = USER_TEXT_VA;
-    regs->x[TF_SP] = USER_STACK_TOP;
-    regs->x[TF_STATUS] = (1UL << 5);
-    t->context.ra = (uint64_t)ret_from_exception;
-    t->context.sp = (uint64_t)regs;
-    unsigned long irq_state = irq_save();
-    list_add_tail(&t->list, &run_queue);
-    irq_restore(irq_state);
-    return t->pid;
 }
 
 void kill_zombies(void) {
@@ -779,7 +257,7 @@ void kill_zombies(void) {
         if (t->parent != (void *)0) {
             printf("[INFO] Killing zombie thread with PID: %d\n", t->pid);
         }
-        free_thread(t);
+        thread_free(t);
         irq_state = irq_save();
     }
     irq_restore(irq_state);

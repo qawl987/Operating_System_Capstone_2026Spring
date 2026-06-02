@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 #include "list.h"
+#include "mmap.h"
 
 #define THREAD_STACK_SIZE 4096UL
 #define USER_STACK_SIZE 4096UL
 #define SIGNAL_MAX 32
-#define MAX_VMA_REGIONS 32
 
 enum thread_state {
     THREAD_RUNNING = 0,
@@ -37,12 +37,6 @@ struct trap_frame {
     uint64_t x[35];
 };
 
-struct vm_area {
-    unsigned long start;
-    unsigned long end;
-    int prot;
-    int flags;
-};
 
 struct thread {
     struct cpu_context context;
@@ -70,21 +64,17 @@ struct thread {
 
 void thread_system_init(void);
 struct thread *thread_create(void (*func)(void));
+struct thread *thread_alloc(void (*func)(void));
+void thread_free(struct thread *t);
+int thread_alloc_pid(void);
+int thread_is_idle(struct thread *t);
+void thread_make_runnable(struct thread *t);
+void thread_add_to_all(struct thread *t);
+void thread_make_zombie(struct thread *t);
+struct thread *thread_find_zombie_child(long pid);
+uint64_t thread_rdtime(void);
 void schedule(void);
 void thread_exit(void);
-void process_exit(int status);
-long process_waitpid(long pid);
-int process_stop(long pid);
-long process_usleep(unsigned int usec);
-long process_mmap(void *addr, unsigned long length, int prot, int flags);
-int process_handle_page_fault(unsigned long addr, unsigned long cause);
-long process_signal(int signum, void (*handler)(void));
-void process_sigreturn(struct trap_frame *regs);
-long process_kill(int pid, int signum);
-void check_pending_signals(struct trap_frame *regs);
-long process_fork(struct trap_frame *regs);
-int process_exec_image(const void *image, unsigned long size);
-int process_spawn_user(const void *image, unsigned long size);
 struct thread *thread_find(int pid);
 void thread_wake_sleepers(uint64_t now);
 void kill_zombies(void);
