@@ -5,6 +5,7 @@
 
 #include "list.h"
 #include "mmap.h"
+#include "vfs.h"
 
 #define THREAD_STACK_SIZE 4096UL
 #define USER_STACK_SIZE 4096UL
@@ -56,6 +57,9 @@ struct thread {
     unsigned long mmap_next;
     int vma_count;
     struct vm_area vmas[MAX_VMA_REGIONS];
+    struct vnode *fs_root;
+    struct vnode *cwd;
+    struct file *files[VFS_MAX_FD];
     void (*entry)(void);
     struct thread *parent;
     struct list_head list;

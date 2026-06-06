@@ -15,6 +15,7 @@
 #include "thread.h"
 #include "uart.h"
 #include "vm.h"
+#include "vfs.h"
 /* Global state for initrd addresses */
 static unsigned long g_initrd_start = 0;
 static unsigned long g_initrd_end = 0;
@@ -165,6 +166,9 @@ void start_kernel(uint64_t hart_id, void *dtb_base) {
     startup_add_reserved(TEST_MEM_BASE, USER_IMAGE_SIZE);
     startup_add_reserved(FRAMEBUFFER_BASE, FRAMEBUFFER_SIZE);
     startup_memory_init(dtb_base, g_initrd_start, g_initrd_end);
+    if (vfs_init(g_initrd_start, g_initrd_end) < 0) {
+        printf("vfs: init failed\r\n");
+    }
     thread_system_init();
     if (framebuffer_init() < 0) {
         printf("framebuffer: init failed\r\n");

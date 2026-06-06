@@ -4,6 +4,7 @@
 #include "kmalloc.h"
 #include "process.h"
 #include "vm.h"
+#include "vfs.h"
 
 static LIST_HEAD(run_queue);
 static LIST_HEAD(zombie_queue);
@@ -119,6 +120,7 @@ struct thread *thread_alloc(void (*func)(void)) {
     t->mmap_next = USER_MMAP_BASE;
     t->entry = func;
     t->parent = get_current();
+    vfs_thread_init(t);
     INIT_LIST_HEAD(&t->list);
     INIT_LIST_HEAD(&t->all_list);
 
@@ -140,6 +142,7 @@ void thread_free(struct thread *t) {
         list_del_init(&t->list);
     }
     irq_restore(irq_state);
+    vfs_thread_cleanup(t);
     vm_free_user_pgd(t->pgd);
     t->pgd = (void *)0;
     if (t->kernel_stack != (void *)0) {
@@ -164,6 +167,7 @@ void thread_system_init(void) {
     boot->state = THREAD_RUNNING;
     boot->pgd = vm_kernel_pgd();
     boot->mmap_next = USER_MMAP_BASE;
+    vfs_thread_init(boot);
     INIT_LIST_HEAD(&boot->list);
     INIT_LIST_HEAD(&boot->all_list);
     thread_add_to_all(boot);

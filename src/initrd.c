@@ -1,3 +1,5 @@
+#include "initrd.h"
+
 #include "helper.h"
 #include "uart.h"
 
@@ -17,6 +19,42 @@ struct cpio_t {
     char namesize[8];
     char check[8];
 };
+
+
+void initrd_iter_begin(struct initrd_iter *it, const void *start,
+                       const void *end) {
+    if (it == (void *)0) {
+        return;
+    }
+    it->cur = start;
+    it->end = end;
+    it->name = (void *)0;
+    it->data = (void *)0;
+    it->size = 0;
+}
+
+int initrd_iter_next(struct initrd_iter *it) {
+    if (it == (void *)0 || it->cur == (void *)0 || it->cur >= it->end) {
+        return -1;
+    }
+
+    struct cpio_t *cpio_header = (struct cpio_t *)it->cur;
+    if (strncmp(cpio_header->magic, "070701", 6) != 0) {
+        return -1;
+    }
+
+    int name_size = hextoi(cpio_header->namesize, 8);
+    int file_size = hextoi(cpio_header->filesize, 8);
+    char *filename = (char *)cpio_header + 110;
+    size_t header_plus_name = align_up_val(110 + name_size, 4);
+
+    it->name = filename;
+    it->data = (const void *)((char *)cpio_header + header_plus_name);
+    it->size = (size_t)file_size;
+    it->cur = (const void *)((char *)cpio_header + header_plus_name +
+                             align_up_val(file_size, 4));
+    return 0;
+}
 
 void initrd_list(const void *start, const void *end) {
     struct cpio_t *cpio_header = (struct cpio_t *)start;

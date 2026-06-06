@@ -7,6 +7,7 @@
 #include "signal.h"
 #include "thread.h"
 #include "vm.h"
+#include "vfs.h"
 
 extern void ret_from_exception(void);
 
@@ -135,6 +136,9 @@ long process_fork(struct trap_frame *regs) {
         return -1;
     }
     child->user_stack = (void *)0;
+    for (int i = 0; i < VFS_MAX_FD; i++) {
+        vfs_file_get(child->files[i]);
+    }
 
     uint64_t tf_off = (uint64_t)regs - (uint64_t)parent->kernel_stack;
     struct trap_frame *child_regs =

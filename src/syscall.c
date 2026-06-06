@@ -1,12 +1,16 @@
 #include "syscall.h"
 
+#include "config.h"
 #include "framebuffer.h"
+#include "helper.h"
 #include "initrd.h"
+#include "kmalloc.h"
 #include "mmap.h"
 #include "process.h"
 #include "signal.h"
 #include "thread.h"
 #include "uart.h"
+#include "vfs.h"
 
 enum {
     SYS_GETPID = 0,
@@ -23,6 +27,13 @@ enum {
     SYS_SIGRETURN = 11,
     SYS_KILL = 12,
     SYS_MMAP = 13,
+    SYS_OPEN = 14,
+    SYS_CLOSE = 15,
+    SYS_READ = 16,
+    SYS_WRITE = 17,
+    SYS_MKDIR = 18,
+    SYS_MOUNT = 19,
+    SYS_CHDIR = 20,
 };
 
 static unsigned long initrd_start;
@@ -55,17 +66,120 @@ static long sys_uart_write(const char *buf, long count) {
     return count;
 }
 
-static long sys_exec(const char *path) {
-    if (path == (void *)0 || initrd_start == 0 || initrd_end == 0) {
+static int fd_alloc(struct thread *task, struct file *file) {
+    if (task == (void *)0 || file == (void *)0) {
         return -1;
     }
-    size_t size = 0;
-    const void *image =
-        initrd_find_file((void *)initrd_start, (void *)initrd_end, path, &size);
+    for (int i = 0; i < VFS_MAX_FD; i++) {
+        if (task->files[i] == (void *)0) {
+            task->files[i] = file;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static struct file *fd_get(struct thread *task, int fd) {
+    if (task == (void *)0 || fd < 0 || fd >= VFS_MAX_FD) {
+        return (void *)0;
+    }
+    return task->files[fd];
+}
+
+static long sys_open(const char *path, int flags) {
+    struct thread *cur = get_current();
+    struct file *file = (void *)0;
+    if (path == (void *)0 ||
+        vfs_open_at(cur->fs_root, cur->cwd, path, flags, &file) < 0) {
+        return -1;
+    }
+    int fd = fd_alloc(cur, file);
+    if (fd < 0) {
+        vfs_close(file);
+        return -1;
+    }
+    return fd;
+}
+
+static long sys_close(int fd) {
+    struct thread *cur = get_current();
+    struct file *file = fd_get(cur, fd);
+    if (file == (void *)0) {
+        return -1;
+    }
+    cur->files[fd] = (void *)0;
+    return vfs_close(file);
+}
+
+static long sys_read(int fd, void *buf, unsigned long count) {
+    struct file *file = fd_get(get_current(), fd);
+    if (file == (void *)0 || buf == (void *)0) {
+        return -1;
+    }
+    return vfs_read(file, buf, count);
+}
+
+static long sys_write(int fd, const void *buf, unsigned long count) {
+    struct file *file = fd_get(get_current(), fd);
+    if (file == (void *)0 || buf == (void *)0) {
+        return -1;
+    }
+    return vfs_write(file, buf, count);
+}
+
+static long sys_mkdir(const char *path) {
+    struct thread *cur = get_current();
+    return vfs_mkdir_at(cur->fs_root, cur->cwd, path);
+}
+
+static long sys_mount(const char *target, const char *filesystem) {
+    struct thread *cur = get_current();
+    return vfs_mount_at(cur->fs_root, cur->cwd, target, filesystem);
+}
+
+static long sys_exec_path(const char *path) {
+    if (path == (void *)0) {
+        return -1;
+    }
+    struct file *file = (void *)0;
+    struct thread *cur = get_current();
+    if (vfs_open_at(cur->fs_root, cur->cwd, path, 0, &file) < 0) {
+        char fallback[VFS_MAX_PATH + 1];
+        if (path[0] == '/' || strlen(path) + 7 > VFS_MAX_PATH) {
+            return -1;
+        }
+        strncpy(fallback, "/ramfs/", sizeof(fallback));
+        strncpy(fallback + 7, path, sizeof(fallback) - 7);
+        fallback[VFS_MAX_PATH] = '\0';
+        if (vfs_open_at(cur->fs_root, cur->cwd, fallback, 0, &file) < 0) {
+            return -1;
+        }
+    }
+
+    void *image = allocate(USER_IMAGE_SIZE);
     if (image == (void *)0) {
+        vfs_close(file);
         return -1;
     }
-    return process_exec_image(image, (unsigned long)size);
+    unsigned long size = 0;
+    while (size < USER_IMAGE_SIZE) {
+        long n = vfs_read(file, (char *)image + size, USER_IMAGE_SIZE - size);
+        if (n < 0) {
+            vfs_close(file);
+            free(image);
+            return -1;
+        }
+        if (n == 0) {
+            break;
+        }
+        size += (unsigned long)n;
+    }
+    vfs_close(file);
+    if (size == 0) {
+        free(image);
+        return -1;
+    }
+    return process_exec_image(image, size);
 }
 
 void syscall_handler(struct pt_regs *regs) {
@@ -92,7 +206,7 @@ void syscall_handler(struct pt_regs *regs) {
         ret = sys_uart_write((const char *)regs->a0, (long)regs->a1);
         break;
     case SYS_EXEC:
-        ret = sys_exec((const char *)regs->a0);
+        ret = sys_exec_path((const char *)regs->a0);
         break;
     case SYS_FORK:
         ret = process_fork((struct trap_frame *)regs);
@@ -130,6 +244,29 @@ void syscall_handler(struct pt_regs *regs) {
     case SYS_MMAP:
         ret = process_mmap((void *)regs->a0, (unsigned long)regs->a1,
                            (int)regs->a2, (int)regs->a3);
+        break;
+    case SYS_OPEN:
+        ret = sys_open((const char *)regs->a0, (int)regs->a1);
+        break;
+    case SYS_CLOSE:
+        ret = sys_close((int)regs->a0);
+        break;
+    case SYS_READ:
+        ret = sys_read((int)regs->a0, (void *)regs->a1,
+                       (unsigned long)regs->a2);
+        break;
+    case SYS_WRITE:
+        ret = sys_write((int)regs->a0, (const void *)regs->a1,
+                        (unsigned long)regs->a2);
+        break;
+    case SYS_MKDIR:
+        ret = sys_mkdir((const char *)regs->a0);
+        break;
+    case SYS_MOUNT:
+        ret = sys_mount((const char *)regs->a1, (const char *)regs->a2);
+        break;
+    case SYS_CHDIR:
+        ret = vfs_chdir(get_current(), (const char *)regs->a0);
         break;
     default:
         ret = -1;
