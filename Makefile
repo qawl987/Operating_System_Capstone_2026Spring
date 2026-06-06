@@ -23,19 +23,19 @@ build_pi: clean
 	mkimage -f kernel.its kernel.fit
 
 run: build
-	$(QEMU) -M virt -m 6G -kernel $(TARGET).img -display none -serial stdio
+	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -display none -serial stdio
 
 run_initrd: build
-	$(QEMU) -M virt -m 6G -kernel $(TARGET).img -initrd initramfs.cpio -display none -serial stdio
+	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -initrd initramfs.cpio -display none -serial stdio
 
 run_initrd_vnc: build
-	$(QEMU) -M virt -m 6G -kernel $(TARGET).img -initrd initramfs.cpio -serial stdio -device ramfb -display vnc=:1
+	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -initrd initramfs.cpio -serial stdio -device ramfb -display vnc=:1
 
 run_pty: build
-	$(QEMU) -M virt -m 6G -kernel $(TARGET).img -display none -serial pty
+	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -display none -serial pty
 
 run_pty_initrd: build
-	$(QEMU) -M virt -m 6G -kernel $(TARGET).img -initrd initramfs.cpio -display none -serial pty
+	$(QEMU) -M virt -m 8G -kernel $(TARGET).img -initrd initramfs.cpio -display none -serial pty
 
 deploy: build_pi
 	@echo "Deploying kernel.fit to SD card..."
