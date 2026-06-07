@@ -115,7 +115,13 @@ static long sys_close(int fd) {
 
 static long sys_read(int fd, void *buf, unsigned long count) {
     struct file *file = fd_get(get_current(), fd);
-    if (file == (void *)0 || buf == (void *)0) {
+    if (file == (void *)0) {
+        return -1;
+    }
+    if (count == 0) {
+        return 0;
+    }
+    if (buf == (void *)0) {
         return -1;
     }
     return vfs_read(file, buf, count);
@@ -123,7 +129,13 @@ static long sys_read(int fd, void *buf, unsigned long count) {
 
 static long sys_write(int fd, const void *buf, unsigned long count) {
     struct file *file = fd_get(get_current(), fd);
-    if (file == (void *)0 || buf == (void *)0) {
+    if (file == (void *)0) {
+        return -1;
+    }
+    if (count == 0) {
+        return 0;
+    }
+    if (buf == (void *)0) {
         return -1;
     }
     return vfs_write(file, buf, count);

@@ -16,12 +16,15 @@ struct devfs_node {
     struct vnode vnode;
 };
 
+struct devfs_mount {
+    struct devfs_node root;
+    struct devfs_node nodes[DEVFS_ENTRIES];
+};
+
 static struct file_operations devfs_dir_ops;
 static struct file_operations uart_file_ops;
 static struct file_operations fb_file_ops;
 static struct vnode_operations devfs_vnode_ops;
-static struct devfs_node devfs_root;
-static struct devfs_node devfs_nodes[DEVFS_ENTRIES];
 
 static int devfs_open_common(struct vnode *file_node, struct file **target) {
     if (file_node == (void *)0 || target == (void *)0 ||
@@ -54,6 +57,9 @@ static int uart_open(struct vnode *file_node, struct file **target) {
 
 static int uart_read_file(struct file *file, void *buf, size_t len) {
     (void)file;
+    if (len == 0) {
+        return 0;
+    }
     if (buf == (void *)0) {
         return -1;
     }
@@ -68,6 +74,9 @@ static int uart_read_file(struct file *file, void *buf, size_t len) {
 
 static int uart_write_file(struct file *file, const void *buf, size_t len) {
     (void)file;
+    if (len == 0) {
+        return 0;
+    }
     if (buf == (void *)0) {
         return -1;
     }
@@ -154,9 +163,13 @@ static int devfs_lookup(struct vnode *dir_node, struct vnode **target,
         component_name == (void *)0 || dir_node->type != VNODE_DIR) {
         return -1;
     }
+    struct devfs_mount *dev = (struct devfs_mount *)dir_node->internal;
+    if (dev == (void *)0) {
+        return -1;
+    }
     for (int i = 0; i < DEVFS_ENTRIES; i++) {
-        if (strcmp(devfs_nodes[i].name, component_name) == 0) {
-            *target = &devfs_nodes[i].vnode;
+        if (strcmp(dev->nodes[i].name, component_name) == 0) {
+            *target = &dev->nodes[i].vnode;
             return 0;
         }
     }
@@ -213,24 +226,33 @@ static struct vnode_operations devfs_vnode_ops = {
 };
 
 static void devfs_init_node(struct mount *mnt, struct devfs_node *node,
+                            struct devfs_node *root,
                             const char *name, int type,
                             struct file_operations *f_ops) {
     node->name = name;
     node->vnode.mount = mnt;
     node->vnode.mounted = (void *)0;
-    node->vnode.parent = type == VNODE_DIR ? (void *)0 : &devfs_root.vnode;
+    node->vnode.parent = type == VNODE_DIR ? (void *)0 : &root->vnode;
     node->vnode.v_ops = &devfs_vnode_ops;
     node->vnode.f_ops = f_ops;
-    node->vnode.internal = node;
+    node->vnode.internal = type == VNODE_DIR ? root->vnode.internal : node;
     node->vnode.type = type;
 }
 
 static int devfs_mount(struct filesystem *fs, struct mount *mnt) {
-    devfs_init_node(mnt, &devfs_root, "", VNODE_DIR, &devfs_dir_ops);
-    devfs_init_node(mnt, &devfs_nodes[0], "uart", VNODE_FILE, &uart_file_ops);
-    devfs_init_node(mnt, &devfs_nodes[1], "fb", VNODE_FILE, &fb_file_ops);
+    struct devfs_mount *dev = (struct devfs_mount *)allocate(sizeof(*dev));
+    if (dev == (void *)0) {
+        return -1;
+    }
+    memset(dev, 0, sizeof(*dev));
+    dev->root.vnode.internal = dev;
+    devfs_init_node(mnt, &dev->root, &dev->root, "", VNODE_DIR, &devfs_dir_ops);
+    devfs_init_node(mnt, &dev->nodes[0], &dev->root, "uart", VNODE_FILE,
+                    &uart_file_ops);
+    devfs_init_node(mnt, &dev->nodes[1], &dev->root, "fb", VNODE_FILE,
+                    &fb_file_ops);
     mnt->fs = fs;
-    mnt->root = &devfs_root.vnode;
+    mnt->root = &dev->root.vnode;
     return 0;
 }
 

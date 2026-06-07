@@ -175,7 +175,13 @@ static int tmpfs_close(struct file *file) {
 static int tmpfs_read(struct file *file, void *buf, size_t len) {
     struct tmpfs_node *node =
         file == (void *)0 ? (void *)0 : vnode_to_tmpfs(file->vnode);
-    if (node == (void *)0 || buf == (void *)0 || node->type != VNODE_FILE) {
+    if (node == (void *)0 || node->type != VNODE_FILE) {
+        return -1;
+    }
+    if (len == 0) {
+        return 0;
+    }
+    if (buf == (void *)0) {
         return -1;
     }
     if (file->f_pos >= node->size) {
@@ -195,8 +201,13 @@ static int tmpfs_read(struct file *file, void *buf, size_t len) {
 static int tmpfs_write(struct file *file, const void *buf, size_t len) {
     struct tmpfs_node *node =
         file == (void *)0 ? (void *)0 : vnode_to_tmpfs(file->vnode);
-    if (node == (void *)0 || buf == (void *)0 || node->type != VNODE_FILE ||
-        node->readonly) {
+    if (node == (void *)0 || node->type != VNODE_FILE || node->readonly) {
+        return -1;
+    }
+    if (len == 0) {
+        return 0;
+    }
+    if (buf == (void *)0) {
         return -1;
     }
     if (file->f_pos > TMPFS_MAX_FILE_SIZE) {
