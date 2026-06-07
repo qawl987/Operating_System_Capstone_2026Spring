@@ -6,6 +6,8 @@
 #include "vfs.h"
 
 #define RAMFS_MAX_ENTRIES 64
+#define CPIO_MODE_TYPE_MASK 0170000
+#define CPIO_MODE_DIR 0040000
 
 static unsigned long ramfs_initrd_start;
 static unsigned long ramfs_initrd_end;
@@ -20,11 +22,13 @@ static int ramfs_populate(struct mount *mnt) {
                       (void *)ramfs_initrd_end);
     while (initrd_iter_next(&it) == 0) {
         if (strcmp(it.name, ".") == 0 || strcmp(it.name, "TRAILER!!!") == 0 ||
-            it.size == 0) {
+            (it.mode & CPIO_MODE_TYPE_MASK) == CPIO_MODE_DIR) {
             continue;
         }
-        tmpfs_add_readonly_file(mnt->root, it.name, (const char *)it.data,
-                                it.size, RAMFS_MAX_ENTRIES);
+        if (tmpfs_add_readonly_file(mnt->root, it.name, (const char *)it.data,
+                                    it.size, RAMFS_MAX_ENTRIES) < 0) {
+            return -1;
+        }
     }
     return 0;
 }

@@ -31,6 +31,7 @@ void initrd_iter_begin(struct initrd_iter *it, const void *start,
     it->name = (void *)0;
     it->data = (void *)0;
     it->size = 0;
+    it->mode = 0;
 }
 
 int initrd_iter_next(struct initrd_iter *it) {
@@ -45,12 +46,14 @@ int initrd_iter_next(struct initrd_iter *it) {
 
     int name_size = hextoi(cpio_header->namesize, 8);
     int file_size = hextoi(cpio_header->filesize, 8);
+    int mode = hextoi(cpio_header->mode, 8);
     char *filename = (char *)cpio_header + 110;
     size_t header_plus_name = align_up_val(110 + name_size, 4);
 
     it->name = filename;
     it->data = (const void *)((char *)cpio_header + header_plus_name);
     it->size = (size_t)file_size;
+    it->mode = mode;
     it->cur = (const void *)((char *)cpio_header + header_plus_name +
                              align_up_val(file_size, 4));
     return 0;

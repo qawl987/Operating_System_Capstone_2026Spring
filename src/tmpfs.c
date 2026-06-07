@@ -290,6 +290,8 @@ int tmpfs_add_readonly_file(struct vnode *root_vnode, const char *path,
                 if (file == (void *)0 || tmpfs_add_child(dir, file) < 0) {
                     return -1;
                 }
+            } else if (file->type != VNODE_FILE) {
+                return -1;
             }
             file->ro_data = data;
             file->size = size;
@@ -303,6 +305,9 @@ int tmpfs_add_readonly_file(struct vnode *root_vnode, const char *path,
             if (next == (void *)0 || tmpfs_add_child(dir, next) < 0) {
                 return -1;
             }
+        }
+        if (next->type != VNODE_DIR) {
+            return -1;
         }
         dir = next;
     }

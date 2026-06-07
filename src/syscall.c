@@ -159,12 +159,25 @@ static long sys_ioctl(int fd, unsigned long request, void *arg) {
 
 static long sys_mkdir(const char *path) {
     struct thread *cur = get_current();
+    if (path == (void *)0) {
+        return -1;
+    }
     return vfs_mkdir_at(cur->fs_root, cur->cwd, path);
 }
 
 static long sys_mount(const char *target, const char *filesystem) {
     struct thread *cur = get_current();
+    if (target == (void *)0 || filesystem == (void *)0) {
+        return -1;
+    }
     return vfs_mount_at(cur->fs_root, cur->cwd, target, filesystem);
+}
+
+static long sys_chdir(const char *path) {
+    if (path == (void *)0) {
+        return -1;
+    }
+    return vfs_chdir(get_current(), path);
 }
 
 static long sys_exec_path(const char *path) {
@@ -296,7 +309,7 @@ void syscall_handler(struct pt_regs *regs) {
         ret = sys_mount((const char *)regs->a1, (const char *)regs->a2);
         break;
     case SYS_CHDIR:
-        ret = vfs_chdir(get_current(), (const char *)regs->a0);
+        ret = sys_chdir((const char *)regs->a0);
         break;
     case SYS_LSEEK64:
         ret = sys_lseek64((int)regs->a0, (long)regs->a1, (int)regs->a2);

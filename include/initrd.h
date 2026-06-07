@@ -9,6 +9,7 @@ struct initrd_iter {
     const char *name;
     const void *data;
     size_t size;
+    int mode;
 };
 
 void initrd_iter_begin(struct initrd_iter *it, const void *start,
