@@ -108,6 +108,8 @@ static void flush_dcache(void *addr, unsigned long len) {
 }
 #endif
 
+static int framebuffer_ready;
+
 int framebuffer_init(void) {
 #ifdef PLATFORM_QEMU
     int ramfb = fw_cfg_find_file("etc/ramfb");
@@ -124,7 +126,42 @@ int framebuffer_init(void) {
     };
     fw_cfg_write_entry(&cfg, (uint32_t)ramfb, sizeof(cfg));
 #endif
+    framebuffer_ready = 1;
     return 0;
+}
+
+int framebuffer_get_info(struct framebuffer_info *info) {
+    if (info == (void *)0) {
+        return -1;
+    }
+    info->width = FRAMEBUFFER_WIDTH;
+    info->height = FRAMEBUFFER_HEIGHT;
+    info->bpp = FRAMEBUFFER_BPP;
+    return 0;
+}
+
+long framebuffer_write(unsigned long offset, const void *buf,
+                       unsigned long count) {
+    if (count == 0) {
+        return 0;
+    }
+    if (buf == (void *)0 || offset > FRAMEBUFFER_SIZE) {
+        return -1;
+    }
+    if (offset == FRAMEBUFFER_SIZE) {
+        return 0;
+    }
+    if (!framebuffer_ready && framebuffer_init() < 0) {
+        return -1;
+    }
+    unsigned long n = FRAMEBUFFER_SIZE - offset;
+    if (n > count) {
+        n = count;
+    }
+    void *dst = (void *)(phys_to_virt(FRAMEBUFFER_BASE) + offset);
+    memcpy(dst, buf, n);
+    flush_dcache(dst, n);
+    return (long)n;
 }
 
 int framebuffer_display(const unsigned int *bmp_image, unsigned int width,

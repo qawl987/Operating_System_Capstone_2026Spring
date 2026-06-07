@@ -34,6 +34,8 @@ enum {
     SYS_MKDIR = 18,
     SYS_MOUNT = 19,
     SYS_CHDIR = 20,
+    SYS_LSEEK64 = 21,
+    SYS_IOCTL = 22,
 };
 
 static unsigned long initrd_start;
@@ -125,6 +127,22 @@ static long sys_write(int fd, const void *buf, unsigned long count) {
         return -1;
     }
     return vfs_write(file, buf, count);
+}
+
+static long sys_lseek64(int fd, long offset, int whence) {
+    struct file *file = fd_get(get_current(), fd);
+    if (file == (void *)0) {
+        return -1;
+    }
+    return vfs_lseek64(file, offset, whence);
+}
+
+static long sys_ioctl(int fd, unsigned long request, void *arg) {
+    struct file *file = fd_get(get_current(), fd);
+    if (file == (void *)0) {
+        return -1;
+    }
+    return vfs_ioctl(file, request, arg);
 }
 
 static long sys_mkdir(const char *path) {
@@ -267,6 +285,13 @@ void syscall_handler(struct pt_regs *regs) {
         break;
     case SYS_CHDIR:
         ret = vfs_chdir(get_current(), (const char *)regs->a0);
+        break;
+    case SYS_LSEEK64:
+        ret = sys_lseek64((int)regs->a0, (long)regs->a1, (int)regs->a2);
+        break;
+    case SYS_IOCTL:
+        ret = sys_ioctl((int)regs->a0, (unsigned long)regs->a1,
+                        (void *)regs->a2);
         break;
     default:
         ret = -1;

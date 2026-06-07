@@ -1,5 +1,6 @@
 #include "vfs.h"
 
+#include "devfs.h"
 #include "helper.h"
 #include "kmalloc.h"
 #include "ramfs.h"
@@ -252,6 +253,14 @@ long vfs_lseek64(struct file *file, long offset, int whence) {
     return file->f_ops->lseek64(file, offset, whence);
 }
 
+int vfs_ioctl(struct file *file, unsigned long request, void *arg) {
+    if (file == (void *)0 || file->f_ops == (void *)0 ||
+        file->f_ops->ioctl == (void *)0) {
+        return -1;
+    }
+    return file->f_ops->ioctl(file, request, arg);
+}
+
 int vfs_mkdir_at(struct vnode *root, struct vnode *cwd, const char *pathname) {
     char name[VFS_MAX_NAME + 1];
     struct vnode *parent = (void *)0;
@@ -315,6 +324,12 @@ int vfs_thread_init(struct thread *task) {
     for (int i = 0; i < VFS_MAX_FD; i++) {
         task->files[i] = (void *)0;
     }
+    for (int i = 0; i < 3; i++) {
+        if (vfs_open_at(task->fs_root, task->cwd, "/dev/uart", 0,
+                        &task->files[i]) < 0) {
+            task->files[i] = (void *)0;
+        }
+    }
     return 0;
 }
 
@@ -333,7 +348,8 @@ void vfs_thread_cleanup(struct thread *task) {
 int vfs_init(unsigned long initrd_start, unsigned long initrd_end) {
     memset(&root_mount, 0, sizeof(root_mount));
     filesystems = (void *)0;
-    if (tmpfs_register() < 0 || ramfs_register(initrd_start, initrd_end) < 0) {
+    if (tmpfs_register() < 0 || ramfs_register(initrd_start, initrd_end) < 0 ||
+        devfs_register() < 0) {
         return -1;
     }
 
@@ -344,5 +360,11 @@ int vfs_init(unsigned long initrd_start, unsigned long initrd_end) {
     if (vfs_mkdir("/ramfs") < 0) {
         return -1;
     }
-    return vfs_mount("/ramfs", "ramfs");
+    if (vfs_mount("/ramfs", "ramfs") < 0) {
+        return -1;
+    }
+    if (vfs_mkdir("/dev") < 0) {
+        return -1;
+    }
+    return vfs_mount("/dev", "devfs");
 }
