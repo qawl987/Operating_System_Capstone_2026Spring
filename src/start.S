@@ -117,6 +117,7 @@ save_context:
 
 .global ret_from_exception
 ret_from_exception:
+    csrci sstatus, 2
     ld s0,  8 * 32(sp)
     andi s0, s0, (1 << 8)
     bnez s0, 1f
@@ -127,6 +128,8 @@ ret_from_exception:
     ld s1,  8 * 31(sp)
     ld s2,  8 * 32(sp)
     csrw sepc, s1
+    li t0, ~2
+    and s2, s2, t0
     csrw sstatus, s2
     ld ra,  8 *  0(sp)
     ld gp,  8 *  2(sp)
