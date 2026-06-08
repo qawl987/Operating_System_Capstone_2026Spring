@@ -17,6 +17,21 @@ static struct task_event *task_free_list;
 static struct task_event *task_head;
 static int task_current_priority = -2147483647;
 
+static inline unsigned long irq_save(void) {
+    unsigned long s;
+    asm volatile("csrr %0, sstatus" : "=r"(s));
+    asm volatile("csrci sstatus, 2" ::: "memory");
+    return s;
+}
+
+static inline void irq_restore(unsigned long s) {
+    if (s & 2UL) {
+        asm volatile("csrsi sstatus, 2" ::: "memory");
+    } else {
+        asm volatile("csrci sstatus, 2" ::: "memory");
+    }
+}
+
 static void adv2_p1_callback(void *arg) {
     (void)arg;
     uart_puts("P1 start\n");
@@ -92,8 +107,10 @@ int add_task(task_callback_t callback, void *arg, int priority) {
         return -1;
     }
 
+    unsigned long irq_state = irq_save();
     struct task_event *n = task_alloc_node();
     if (n == (void *)0) {
+        irq_restore(irq_state);
         return -1;
     }
     n->priority = priority;
@@ -103,6 +120,7 @@ int add_task(task_callback_t callback, void *arg, int priority) {
     if (task_head == (void *)0 || priority > task_head->priority) {
         n->next = task_head;
         task_head = n;
+        irq_restore(irq_state);
         return 0;
     }
 
@@ -112,13 +130,21 @@ int add_task(task_callback_t callback, void *arg, int priority) {
     }
     n->next = cur->next;
     cur->next = n;
+    irq_restore(irq_state);
     return 0;
 }
 
 void task_run_pending(void) {
-    while (task_head != (void *)0) {
+    while (1) {
+        unsigned long irq_state = irq_save();
+        if (task_head == (void *)0) {
+            irq_restore(irq_state);
+            return;
+        }
+
         struct task_event *n = task_head;
         if (task_current_priority > n->priority) {
+            irq_restore(irq_state);
             return;
         }
         task_head = n->next;
@@ -130,6 +156,8 @@ void task_run_pending(void) {
 
         int prev_priority = task_current_priority;
         task_current_priority = priority;
+        irq_restore(irq_state);
+
         unsigned long sstatus;
         asm volatile("csrr %0, sstatus" : "=r"(sstatus));
         asm volatile("csrsi sstatus, 2");
@@ -141,7 +169,10 @@ void task_run_pending(void) {
         } else {
             asm volatile("csrci sstatus, 2");
         }
+
+        irq_state = irq_save();
         task_current_priority = prev_priority;
+        irq_restore(irq_state);
     }
 }
 

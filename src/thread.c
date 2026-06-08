@@ -220,9 +220,9 @@ void schedule(void) {
         irq_restore(irq_state);
         return;
     }
-    irq_restore(irq_state);
     vm_switch(next->pgd);
     switch_to(prev, next);
+    irq_restore(irq_state);
 }
 
 void thread_exit(void) {

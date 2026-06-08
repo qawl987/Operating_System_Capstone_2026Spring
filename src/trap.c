@@ -55,12 +55,6 @@ static inline void write_sscratch(unsigned long val) {
     asm volatile("csrw sscratch, %0" : : "r"(val));
 }
 
-static inline unsigned long read_sp(void) {
-    unsigned long sp;
-    asm volatile("mv %0, sp" : "=r"(sp));
-    return sp;
-}
-
 static inline void plic_write(uint64_t addr, uint32_t val) {
     *(volatile uint32_t *)addr = val;
 }
@@ -158,7 +152,7 @@ static void handle_exception(unsigned long cause, struct pt_regs *regs) {
     }
 
     if (regs != (void *)0 && is_page_fault(cause) &&
-        regs->badvaddr < USER_STACK_TOP) {
+        (regs->status & SSTATUS_SPP) == 0 && regs->badvaddr < USER_STACK_TOP) {
         if (process_handle_page_fault(regs->badvaddr, cause) == 0) {
             return;
         }
@@ -180,8 +174,8 @@ void do_trap(struct pt_regs *regs) {
     } else {
         handle_exception(regs->cause, regs);
     }
-    task_run_pending();
     if ((regs->status & SSTATUS_SPP) == 0) {
+        task_run_pending();
         check_pending_signals((struct trap_frame *)regs);
     }
 }
@@ -200,7 +194,7 @@ void trap_init(uint64_t hart_id, uint64_t tick_hz) {
         timer_interval_ticks = 1;
     }
     write_stvec((void *)handle_exception_entry);
-    write_sscratch(read_sp());
+    write_sscratch(0);
     plic_init();
     task_init();
     timer_init(boot_time_base, timer_tick_hz);
