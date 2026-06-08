@@ -152,7 +152,7 @@ static void handle_exception(unsigned long cause, struct pt_regs *regs) {
     }
 
     if (regs != (void *)0 && is_page_fault(cause) &&
-        (regs->status & SSTATUS_SPP) == 0 && regs->badvaddr < USER_STACK_TOP) {
+        regs->badvaddr < USER_STACK_TOP) {
         if (process_handle_page_fault(regs->badvaddr, cause) == 0) {
             return;
         }
