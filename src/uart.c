@@ -1,3 +1,4 @@
+#include "helper.h"
 #include "thread.h"
 #include "vm.h"
 
@@ -33,21 +34,6 @@ static volatile unsigned int tx_r;
 static volatile unsigned int tx_w;
 static volatile int rx_overflow;
 static volatile int uart_polling_mode;
-
-static inline unsigned long irq_save(void) {
-    unsigned long s;
-    asm volatile("csrr %0, sstatus" : "=r"(s));
-    asm volatile("csrci sstatus, 2");
-    return s;
-}
-
-static inline void irq_restore(unsigned long s) {
-    if (s & 2UL) {
-        asm volatile("csrsi sstatus, 2");
-    } else {
-        asm volatile("csrci sstatus, 2");
-    }
-}
 
 static inline uart_reg_t *uart_rbr(void) {
     return (uart_reg_t *)(uart_base + (0x0 << REG_SHIFT));

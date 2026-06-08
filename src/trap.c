@@ -30,31 +30,6 @@ static uint64_t timer_tick_hz = TIMER_TICK_HZ;
 static uint64_t timer_interval_ticks = TIMER_INTERVAL_TICKS;
 static int loader_mode;
 
-static inline uint64_t rdtime(void) {
-    uint64_t t;
-    asm volatile("rdtime %0" : "=r"(t));
-    return t;
-}
-
-static inline void enable_sstatus_sie(void) { asm volatile("csrsi sstatus, 2"); }
-static inline void disable_sstatus_sie(void) { asm volatile("csrci sstatus, 2"); }
-
-static inline void enable_sie_stie(void) {
-    asm volatile("li t0, (1 << 5)\n\tcsrs sie, t0" : : : "t0");
-}
-
-static inline void enable_sie_seie(void) {
-    asm volatile("li t0, (1 << 9)\n\tcsrs sie, t0" : : : "t0");
-}
-
-static inline void write_stvec(void *addr) {
-    asm volatile("csrw stvec, %0" : : "r"(addr));
-}
-
-static inline void write_sscratch(unsigned long val) {
-    asm volatile("csrw sscratch, %0" : : "r"(val));
-}
-
 static inline void plic_write(uint64_t addr, uint32_t val) {
     *(volatile uint32_t *)addr = val;
 }

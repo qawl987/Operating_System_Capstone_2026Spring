@@ -231,8 +231,8 @@ void syscall_handler(struct pt_regs *regs) {
         return;
     }
 
-    asm volatile("csrsi sstatus, 2\n"
-                 "li t0, (1 << 18)\n"
+    enable_sstatus_sie();
+    asm volatile("li t0, (1 << 18)\n"
                  "csrs sstatus, t0"
                  :
                  :

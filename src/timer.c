@@ -22,12 +22,6 @@ static uint64_t g_interval_ticks;
 static int g_periodic_log_enabled = 0;
 static int g_periodic_log_armed;
 
-static inline uint64_t rdtime(void) {
-    uint64_t t;
-    asm volatile("rdtime %0" : "=r"(t));
-    return t;
-}
-
 static struct timer_event *timer_alloc_node(void) {
     struct timer_event *n = timer_free_list;
     if (n != (void *)0) {

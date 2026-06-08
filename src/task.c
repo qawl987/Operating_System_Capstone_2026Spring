@@ -1,3 +1,4 @@
+#include "helper.h"
 #include "task.h"
 #include "uart.h"
 
@@ -16,21 +17,6 @@ static struct task_event task_pool[TASK_LIST_MAX];
 static struct task_event *task_free_list;
 static struct task_event *task_head;
 static int task_current_priority = -2147483647;
-
-static inline unsigned long irq_save(void) {
-    unsigned long s;
-    asm volatile("csrr %0, sstatus" : "=r"(s));
-    asm volatile("csrci sstatus, 2" ::: "memory");
-    return s;
-}
-
-static inline void irq_restore(unsigned long s) {
-    if (s & 2UL) {
-        asm volatile("csrsi sstatus, 2" ::: "memory");
-    } else {
-        asm volatile("csrci sstatus, 2" ::: "memory");
-    }
-}
 
 static void adv2_p1_callback(void *arg) {
     (void)arg;
@@ -158,17 +144,12 @@ void task_run_pending(void) {
         task_current_priority = priority;
         irq_restore(irq_state);
 
-        unsigned long sstatus;
-        asm volatile("csrr %0, sstatus" : "=r"(sstatus));
-        asm volatile("csrsi sstatus, 2");
+        unsigned long sstatus = irq_save();
+        enable_sstatus_sie();
         if (callback) {
             callback(arg);
         }
-        if (sstatus & 2UL) {
-            asm volatile("csrsi sstatus, 2");
-        } else {
-            asm volatile("csrci sstatus, 2");
-        }
+        irq_restore(sstatus);
 
         irq_state = irq_save();
         task_current_priority = prev_priority;

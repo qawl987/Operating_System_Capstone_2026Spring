@@ -12,33 +12,12 @@ static LIST_HEAD(all_threads);
 static struct thread *idle_thread;
 static int next_pid = 1;
 
-static inline unsigned long irq_save(void) {
-    unsigned long s;
-    asm volatile("csrr %0, sstatus" : "=r"(s));
-    asm volatile("csrci sstatus, 2" ::: "memory");
-    return s;
-}
-
-static inline void irq_restore(unsigned long s) {
-    if (s & 2UL) {
-        asm volatile("csrsi sstatus, 2" ::: "memory");
-    } else {
-        asm volatile("csrci sstatus, 2" ::: "memory");
-    }
-}
-
 int thread_alloc_pid(void) {
     return next_pid++;
 }
 
 int thread_is_idle(struct thread *t) {
     return t == idle_thread;
-}
-
-uint64_t thread_rdtime(void) {
-    uint64_t t;
-    asm volatile("rdtime %0" : "=r"(t));
-    return t;
 }
 
 void thread_add_to_all(struct thread *t) {
