@@ -1,0 +1,2 @@
+BasedOnStyle: LLVM  # or other base style (Google, Mozilla, WebKit, etc.)
+IndentWidth: 4
