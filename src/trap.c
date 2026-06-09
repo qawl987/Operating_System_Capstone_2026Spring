@@ -149,8 +149,8 @@ void do_trap(struct pt_regs *regs) {
     } else {
         handle_exception(regs->cause, regs);
     }
+    task_run_pending();
     if ((regs->status & SSTATUS_SPP) == 0) {
-        task_run_pending();
         check_pending_signals((struct trap_frame *)regs);
     }
 }
