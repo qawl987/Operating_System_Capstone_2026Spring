@@ -251,6 +251,15 @@ void startup_memory_init(void *dtb_base, uint64_t initrd_start,
     log_info("Reserving Kernel: 0x%x - 0x%x\n", kernel_start, kernel_end_addr);
     startup_add_reserved(kernel_start, kernel_size);
 
+    /*
+     * The active Sv39 boot page tables live outside the linked kernel image.
+     * Keep both the startup allocator and buddy allocator from reusing them.
+     */
+    log_info("Reserving Boot page tables: 0x%x - 0x%x\n",
+             (uint64_t)BOOT_PGTABLE_BASE,
+             (uint64_t)BOOT_PGTABLE_BASE + BOOT_PGTABLE_SIZE);
+    startup_add_reserved(BOOT_PGTABLE_BASE, BOOT_PGTABLE_SIZE);
+
     /* Reserve bootloader relocation area */
     uint64_t reloc_size = virt_to_phys((uint64_t)_load_end) -
                           virt_to_phys((uint64_t)_load_start);

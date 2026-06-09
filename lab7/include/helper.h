@@ -20,6 +20,17 @@ uint64_t bswap64(uint64_t x);
 const void *align_up(const void *ptr, size_t align);
 size_t align_up_val(size_t val, size_t align);
 
+// Low-level CSR helpers
+unsigned long irq_save(void);
+void irq_restore(unsigned long s);
+uint64_t rdtime(void);
+void enable_sstatus_sie(void);
+void disable_sstatus_sie(void);
+void enable_sie_stie(void);
+void enable_sie_seie(void);
+void write_stvec(void *addr);
+void write_sscratch(unsigned long val);
+
 // Hex string to integer
 int hextoi(const char *s, int n);
 

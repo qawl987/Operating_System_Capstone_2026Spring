@@ -11,6 +11,7 @@
 #include "thread.h"
 #include "uart.h"
 #include "vfs.h"
+#include "vm.h"
 
 enum {
     SYS_GETPID = 0,
@@ -46,13 +47,142 @@ void syscall_set_initrd(unsigned long start, unsigned long end) {
     initrd_end = end;
 }
 
+static int user_page_ptr(const void *user, int write, void **kernel,
+                         size_t *avail) {
+    struct thread *cur = get_current();
+    unsigned long va = (unsigned long)user;
+    if (cur == (void *)0 || cur->pgd == (void *)0 || user == (void *)0 ||
+        va >= USER_STACK_TOP) {
+        return -1;
+    }
+
+    unsigned long *pte = vm_get_pte(cur->pgd, va);
+    if (pte == (void *)0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
+        (write && (*pte & PTE_W) == 0) ||
+        (!write && (*pte & PTE_R) == 0)) {
+        if (process_handle_page_fault(va, write ? 15 : 13) < 0) {
+            return -1;
+        }
+        pte = vm_get_pte(cur->pgd, va);
+    }
+
+    if (pte == (void *)0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
+        (write && (*pte & PTE_W) == 0) ||
+        (!write && (*pte & PTE_R) == 0)) {
+        return -1;
+    }
+
+    unsigned long off = va & (VM_PAGE_SIZE - 1);
+    unsigned long pa = ((*pte >> 10) << 12) + off;
+    *kernel = (void *)phys_to_virt(pa);
+    *avail = VM_PAGE_SIZE - off;
+    if (*avail > USER_STACK_TOP - va) {
+        *avail = USER_STACK_TOP - va;
+    }
+    return 0;
+}
+
+static int user_check(const void *user, size_t len, int write) {
+    size_t done = 0;
+    if (len == 0) {
+        return 0;
+    }
+    if (user == (void *)0 || (unsigned long)user >= USER_STACK_TOP ||
+        len > USER_STACK_TOP - (unsigned long)user) {
+        return -1;
+    }
+    while (done < len) {
+        void *kernel = (void *)0;
+        size_t avail = 0;
+        if (user_page_ptr((const char *)user + done, write, &kernel, &avail) <
+            0) {
+            return -1;
+        }
+        (void)kernel;
+        done += avail;
+    }
+    return 0;
+}
+
+static int copy_from_user(void *dst, const void *src, size_t len) {
+    size_t done = 0;
+    if (len == 0) {
+        return 0;
+    }
+    if (dst == (void *)0 || src == (void *)0 ||
+        (unsigned long)src >= USER_STACK_TOP ||
+        len > USER_STACK_TOP - (unsigned long)src) {
+        return -1;
+    }
+    while (done < len) {
+        void *kernel = (void *)0;
+        size_t avail = 0;
+        if (user_page_ptr((const char *)src + done, 0, &kernel, &avail) < 0) {
+            return -1;
+        }
+        if (avail > len - done) {
+            avail = len - done;
+        }
+        memcpy((char *)dst + done, kernel, avail);
+        done += avail;
+    }
+    return 0;
+}
+
+static int copy_to_user(void *dst, const void *src, size_t len) {
+    size_t done = 0;
+    if (len == 0) {
+        return 0;
+    }
+    if (dst == (void *)0 || src == (void *)0 ||
+        (unsigned long)dst >= USER_STACK_TOP ||
+        len > USER_STACK_TOP - (unsigned long)dst) {
+        return -1;
+    }
+    while (done < len) {
+        void *kernel = (void *)0;
+        size_t avail = 0;
+        if (user_page_ptr((char *)dst + done, 1, &kernel, &avail) < 0) {
+            return -1;
+        }
+        if (avail > len - done) {
+            avail = len - done;
+        }
+        memcpy(kernel, (const char *)src + done, avail);
+        done += avail;
+    }
+    return 0;
+}
+
+static int copy_string_from_user(char *dst, const char *src, size_t max) {
+    if (dst == (void *)0 || src == (void *)0 || max == 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < max; i++) {
+        if (copy_from_user(&dst[i], src + i, 1) < 0) {
+            return -1;
+        }
+        if (dst[i] == '\0') {
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static long sys_uart_read(char *buf, long count) {
     if (buf == (void *)0 || count < 0) {
         return -1;
     }
+    if (user_check(buf, (size_t)count, 1) < 0) {
+        return -1;
+    }
     for (long i = 0; i < count; i++) {
-        while (uart_try_getc(&buf[i]) < 0) {
+        char ch;
+        while (uart_try_getc(&ch) < 0) {
             schedule();
+        }
+        if (copy_to_user(buf + i, &ch, 1) < 0) {
+            return i == 0 ? -1 : i;
         }
     }
     return count;
@@ -62,8 +192,20 @@ static long sys_uart_write(const char *buf, long count) {
     if (buf == (void *)0 || count < 0) {
         return -1;
     }
-    for (long i = 0; i < count; i++) {
-        uart_putc(buf[i]);
+    unsigned char tmp[512];
+    long done = 0;
+    while (done < count) {
+        size_t n = (size_t)(count - done);
+        if (n > sizeof(tmp)) {
+            n = sizeof(tmp);
+        }
+        if (copy_from_user(tmp, buf + done, n) < 0) {
+            return done == 0 ? -1 : done;
+        }
+        for (size_t i = 0; i < n; i++) {
+            uart_putc(tmp[i]);
+        }
+        done += (long)n;
     }
     return count;
 }
@@ -91,8 +233,9 @@ static struct file *fd_get(struct thread *task, int fd) {
 static long sys_open(const char *path, int flags) {
     struct thread *cur = get_current();
     struct file *file = (void *)0;
-    if (path == (void *)0 ||
-        vfs_open_at(cur->fs_root, cur->cwd, path, flags, &file) < 0) {
+    char kpath[VFS_MAX_PATH + 1];
+    if (copy_string_from_user(kpath, path, sizeof(kpath)) < 0 ||
+        vfs_open_at(cur->fs_root, cur->cwd, kpath, flags, &file) < 0) {
         return -1;
     }
     int fd = fd_alloc(cur, file);
@@ -115,30 +258,71 @@ static long sys_close(int fd) {
 
 static long sys_read(int fd, void *buf, unsigned long count) {
     struct file *file = fd_get(get_current(), fd);
+    unsigned char tmp[512];
+    unsigned long done = 0;
     if (file == (void *)0) {
         return -1;
     }
     if (count == 0) {
         return 0;
     }
-    if (buf == (void *)0) {
+    if (user_check(buf, count, 1) < 0) {
         return -1;
     }
-    return vfs_read(file, buf, count);
+    while (done < count) {
+        size_t n = count - done;
+        if (n > sizeof(tmp)) {
+            n = sizeof(tmp);
+        }
+        long ret = vfs_read(file, tmp, n);
+        if (ret < 0) {
+            return done == 0 ? ret : (long)done;
+        }
+        if (ret == 0) {
+            break;
+        }
+        if (copy_to_user((char *)buf + done, tmp, (size_t)ret) < 0) {
+            return done == 0 ? -1 : (long)done;
+        }
+        done += (unsigned long)ret;
+        if ((size_t)ret < n) {
+            break;
+        }
+    }
+    return (long)done;
 }
 
 static long sys_write(int fd, const void *buf, unsigned long count) {
     struct file *file = fd_get(get_current(), fd);
+    unsigned char tmp[512];
+    unsigned long done = 0;
     if (file == (void *)0) {
         return -1;
     }
     if (count == 0) {
         return 0;
     }
-    if (buf == (void *)0) {
-        return -1;
+    while (done < count) {
+        size_t n = count - done;
+        if (n > sizeof(tmp)) {
+            n = sizeof(tmp);
+        }
+        if (copy_from_user(tmp, (const char *)buf + done, n) < 0) {
+            return done == 0 ? -1 : (long)done;
+        }
+        long ret = vfs_write(file, tmp, n);
+        if (ret < 0) {
+            return done == 0 ? ret : (long)done;
+        }
+        if (ret == 0) {
+            break;
+        }
+        done += (unsigned long)ret;
+        if ((size_t)ret < n) {
+            break;
+        }
     }
-    return vfs_write(file, buf, count);
+    return (long)done;
 }
 
 static long sys_lseek64(int fd, long offset, int whence) {
@@ -154,45 +338,59 @@ static long sys_ioctl(int fd, unsigned long request, void *arg) {
     if (file == (void *)0) {
         return -1;
     }
-    return vfs_ioctl(file, request, arg);
+    if (request == 0) {
+        struct framebuffer_info info;
+        long ret = vfs_ioctl(file, request, &info);
+        if (ret < 0) {
+            return ret;
+        }
+        return copy_to_user(arg, &info, sizeof(info));
+    }
+    return vfs_ioctl(file, request, (void *)0);
 }
 
 static long sys_mkdir(const char *path) {
     struct thread *cur = get_current();
-    if (path == (void *)0) {
+    char kpath[VFS_MAX_PATH + 1];
+    if (copy_string_from_user(kpath, path, sizeof(kpath)) < 0) {
         return -1;
     }
-    return vfs_mkdir_at(cur->fs_root, cur->cwd, path);
+    return vfs_mkdir_at(cur->fs_root, cur->cwd, kpath);
 }
 
 static long sys_mount(const char *target, const char *filesystem) {
     struct thread *cur = get_current();
-    if (target == (void *)0 || filesystem == (void *)0) {
+    char ktarget[VFS_MAX_PATH + 1];
+    char kfs[VFS_MAX_NAME + 1];
+    if (copy_string_from_user(ktarget, target, sizeof(ktarget)) < 0 ||
+        copy_string_from_user(kfs, filesystem, sizeof(kfs)) < 0) {
         return -1;
     }
-    return vfs_mount_at(cur->fs_root, cur->cwd, target, filesystem);
+    return vfs_mount_at(cur->fs_root, cur->cwd, ktarget, kfs);
 }
 
 static long sys_chdir(const char *path) {
-    if (path == (void *)0) {
+    char kpath[VFS_MAX_PATH + 1];
+    if (copy_string_from_user(kpath, path, sizeof(kpath)) < 0) {
         return -1;
     }
-    return vfs_chdir(get_current(), path);
+    return vfs_chdir(get_current(), kpath);
 }
 
 static long sys_exec_path(const char *path) {
-    if (path == (void *)0) {
+    char kpath[VFS_MAX_PATH + 1];
+    if (copy_string_from_user(kpath, path, sizeof(kpath)) < 0) {
         return -1;
     }
     struct file *file = (void *)0;
     struct thread *cur = get_current();
-    if (vfs_open_at(cur->fs_root, cur->cwd, path, 0, &file) < 0) {
+    if (vfs_open_at(cur->fs_root, cur->cwd, kpath, 0, &file) < 0) {
         char fallback[VFS_MAX_PATH + 1];
-        if (path[0] == '/' || strlen(path) + 7 > VFS_MAX_PATH) {
+        if (kpath[0] == '/' || strlen(kpath) + 7 > VFS_MAX_PATH) {
             return -1;
         }
         strncpy(fallback, "/ramfs/", sizeof(fallback));
-        strncpy(fallback + 7, path, sizeof(fallback) - 7);
+        strncpy(fallback + 7, kpath, sizeof(fallback) - 7);
         fallback[VFS_MAX_PATH] = '\0';
         if (vfs_open_at(cur->fs_root, cur->cwd, fallback, 0, &file) < 0) {
             return -1;
@@ -225,14 +423,33 @@ static long sys_exec_path(const char *path) {
     return process_exec_image(image, size);
 }
 
+static long sys_display(const unsigned int *bmp_image, unsigned int width,
+                        unsigned int height) {
+    unsigned long pixels;
+    unsigned long bytes;
+    if (bmp_image == (void *)0 || width == 0 || height == 0 ||
+        width > FRAMEBUFFER_WIDTH || height > FRAMEBUFFER_HEIGHT) {
+        return -1;
+    }
+    pixels = (unsigned long)width * (unsigned long)height;
+    if (pixels > FRAMEBUFFER_SIZE / sizeof(unsigned int)) {
+        return -1;
+    }
+    bytes = pixels * sizeof(unsigned int);
+    if (user_check(bmp_image, bytes, 0) < 0) {
+        return -1;
+    }
+    return framebuffer_display(bmp_image, width, height);
+}
+
 void syscall_handler(struct pt_regs *regs) {
     long ret = -1;
     if (regs == (void *)0) {
         return;
     }
 
-    asm volatile("csrsi sstatus, 2\n"
-                 "li t0, (1 << 18)\n"
+    enable_sstatus_sie();
+    asm volatile("li t0, (1 << 18)\n"
                  "csrs sstatus, t0"
                  :
                  :
@@ -265,9 +482,8 @@ void syscall_handler(struct pt_regs *regs) {
         ret = process_stop((long)regs->a0);
         break;
     case SYS_DISPLAY:
-        ret = framebuffer_display((const unsigned int *)regs->a0,
-                                  (unsigned int)regs->a1,
-                                  (unsigned int)regs->a2);
+        ret = sys_display((const unsigned int *)regs->a0,
+                          (unsigned int)regs->a1, (unsigned int)regs->a2);
         break;
     case SYS_USLEEP:
         ret = process_usleep((unsigned int)regs->a0);

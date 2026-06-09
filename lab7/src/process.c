@@ -84,7 +84,7 @@ long process_usleep(unsigned int usec) {
     if (delay == 0) {
         delay = 1;
     }
-    cur->wake_time = thread_rdtime() + delay;
+    cur->wake_time = rdtime() + delay;
     cur->state = THREAD_SLEEPING;
     schedule();
     return 0;

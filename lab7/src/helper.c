@@ -2,6 +2,45 @@
 #include "uart.h"
 #include <stdarg.h>
 
+unsigned long irq_save(void) {
+    unsigned long s;
+    asm volatile("csrr %0, sstatus" : "=r"(s));
+    asm volatile("csrci sstatus, 2" ::: "memory");
+    return s;
+}
+
+void irq_restore(unsigned long s) {
+    if (s & 2UL) {
+        asm volatile("csrsi sstatus, 2" ::: "memory");
+    } else {
+        asm volatile("csrci sstatus, 2" ::: "memory");
+    }
+}
+
+uint64_t rdtime(void) {
+    uint64_t t;
+    asm volatile("rdtime %0" : "=r"(t));
+    return t;
+}
+
+void enable_sstatus_sie(void) { asm volatile("csrsi sstatus, 2"); }
+
+void disable_sstatus_sie(void) { asm volatile("csrci sstatus, 2"); }
+
+void enable_sie_stie(void) {
+    asm volatile("li t0, (1 << 5)\n\tcsrs sie, t0" : : : "t0");
+}
+
+void enable_sie_seie(void) {
+    asm volatile("li t0, (1 << 9)\n\tcsrs sie, t0" : : : "t0");
+}
+
+void write_stvec(void *addr) { asm volatile("csrw stvec, %0" : : "r"(addr)); }
+
+void write_sscratch(unsigned long val) {
+    asm volatile("csrw sscratch, %0" : : "r"(val));
+}
+
 size_t strlen(const char *s) {
     size_t len = 0;
     while (*s++)

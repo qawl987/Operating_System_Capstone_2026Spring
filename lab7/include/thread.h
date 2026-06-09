@@ -76,7 +76,6 @@ void thread_make_runnable(struct thread *t);
 void thread_add_to_all(struct thread *t);
 void thread_make_zombie(struct thread *t);
 struct thread *thread_find_zombie_child(long pid);
-uint64_t thread_rdtime(void);
 void schedule(void);
 void thread_exit(void);
 struct thread *thread_find(int pid);
