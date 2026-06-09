@@ -148,8 +148,7 @@ static int tmpfs_mkdir(struct vnode *dir_node, struct vnode **target,
 }
 
 static int tmpfs_open(struct vnode *file_node, struct file **target) {
-    if (file_node == (void *)0 || target == (void *)0 ||
-        file_node->type != VNODE_FILE) {
+    if (file_node == (void *)0 || target == (void *)0) {
         return -1;
     }
     struct file *file = (struct file *)allocate(sizeof(struct file));
@@ -229,8 +228,9 @@ static int tmpfs_write(struct file *file, const void *buf, size_t len) {
 static long tmpfs_lseek64(struct file *file, long offset, int whence) {
     struct tmpfs_node *node =
         file == (void *)0 ? (void *)0 : vnode_to_tmpfs(file->vnode);
-    if (node == (void *)0 || whence != VFS_SEEK_SET || offset < 0 ||
-        (unsigned long)offset > node->size) {
+    if (node == (void *)0 || node->type != VNODE_FILE ||
+        whence != VFS_SEEK_SET || offset < 0 ||
+        (unsigned long)offset > TMPFS_MAX_FILE_SIZE) {
         return -1;
     }
     file->f_pos = (size_t)offset;

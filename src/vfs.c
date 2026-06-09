@@ -174,6 +174,15 @@ static int lookup_parent(struct vnode *root, struct vnode *cwd,
     }
 }
 
+static int has_trailing_slash(const char *pathname) {
+    size_t len = strlen(pathname);
+    size_t end = len;
+    while (end > 0 && pathname[end - 1] == '/') {
+        end--;
+    }
+    return end > 0 && end < len;
+}
+
 int vfs_open_at(struct vnode *root, struct vnode *cwd, const char *pathname,
                 int flags, struct file **target) {
     if (target == (void *)0) {
@@ -182,6 +191,9 @@ int vfs_open_at(struct vnode *root, struct vnode *cwd, const char *pathname,
     struct vnode *node = (void *)0;
     if (vfs_lookup_at(root, cwd, pathname, &node) < 0) {
         if ((flags & VFS_O_CREAT) == 0) {
+            return -1;
+        }
+        if (has_trailing_slash(pathname)) {
             return -1;
         }
         char name[VFS_MAX_NAME + 1];

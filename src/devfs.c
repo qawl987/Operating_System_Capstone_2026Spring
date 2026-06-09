@@ -27,8 +27,7 @@ static struct file_operations fb_file_ops;
 static struct vnode_operations devfs_vnode_ops;
 
 static int devfs_open_common(struct vnode *file_node, struct file **target) {
-    if (file_node == (void *)0 || target == (void *)0 ||
-        file_node->type != VNODE_FILE) {
+    if (file_node == (void *)0 || target == (void *)0) {
         return -1;
     }
     struct file *file = (struct file *)allocate(sizeof(struct file));
