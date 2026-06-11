@@ -136,6 +136,7 @@ long process_fork(struct trap_frame *regs) {
         return -1;
     }
     child->user_stack = (void *)0;
+    // child files clone above, so refcnt++ here
     for (int i = 0; i < VFS_MAX_FD; i++) {
         vfs_file_get(child->files[i]);
     }
