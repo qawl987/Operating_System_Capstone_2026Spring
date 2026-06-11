@@ -65,6 +65,7 @@ static struct tmpfs_node *tmpfs_alloc_node(struct mount *mnt,
     node->type = type;
     node->readonly = readonly;
     node->parent = parent;
+    // alloc child memory
     if (type == VNODE_DIR && tmpfs_init_children(node, child_cap) < 0) {
         free(node);
         return (void *)0;
@@ -100,6 +101,7 @@ static struct tmpfs_node *tmpfs_find_child(struct tmpfs_node *dir,
     return (void *)0;
 }
 
+// find one layer child vnode in parent dir
 static int tmpfs_lookup(struct vnode *dir_node, struct vnode **target,
                         const char *component_name) {
     struct tmpfs_node *dir = vnode_to_tmpfs(dir_node);
@@ -119,6 +121,7 @@ static int tmpfs_lookup(struct vnode *dir_node, struct vnode **target,
 static int tmpfs_create_common(struct vnode *dir_node, struct vnode **target,
                                const char *name, int type) {
     struct tmpfs_node *dir = vnode_to_tmpfs(dir_node);
+    // tmpfs_find_child check dir exist
     if (dir == (void *)0 || target == (void *)0 || name == (void *)0 ||
         dir->type != VNODE_DIR || dir->readonly || name[0] == '\0' ||
         name_too_long(name) || tmpfs_find_child(dir, name) != (void *)0) {
@@ -158,6 +161,7 @@ static int tmpfs_open(struct vnode *file_node, struct file **target) {
     memset(file, 0, sizeof(*file));
     file->vnode = file_node;
     file->f_ops = file_node->f_ops;
+    // each open syscall create new file, so start from 1. Change when fork occur
     file->refcnt = 1;
     *target = file;
     return 0;
@@ -219,6 +223,7 @@ static int tmpfs_write(struct file *file, const void *buf, size_t len) {
     }
     memcpy(node->data + file->f_pos, buf, n);
     file->f_pos += n;
+    // If file grow after write, update node size
     if (file->f_pos > node->size) {
         node->size = file->f_pos;
     }
@@ -269,7 +274,7 @@ int tmpfs_add_readonly_file(struct vnode *root_vnode, const char *path,
     struct tmpfs_node *dir = root;
     const char *p = path;
     char name[VFS_MAX_NAME + 1];
-
+    // ex: /ramfs/dir/a.txt
     while (1) {
         int ret = vfs_next_path_component(&p, name);
         if (ret < 0) {
@@ -284,6 +289,7 @@ int tmpfs_add_readonly_file(struct vnode *root_vnode, const char *path,
         int last = vfs_next_path_component(&save, probe) == 0;
         if (last) {
             struct tmpfs_node *file = tmpfs_find_child(dir, name);
+            // if not exist, create it
             if (file == (void *)0) {
                 file = tmpfs_alloc_node(root_vnode->mount, dir, name,
                                         VNODE_FILE, 1, 0);
@@ -293,13 +299,15 @@ int tmpfs_add_readonly_file(struct vnode *root_vnode, const char *path,
             } else if (file->type != VNODE_FILE) {
                 return -1;
             }
+            // put in ro_data
             file->ro_data = data;
             file->size = size;
             return 0;
         }
-
+        // /dir/, create middle directory
         struct tmpfs_node *next = tmpfs_find_child(dir, name);
         if (next == (void *)0) {
+            // if not exist, create it
             next = tmpfs_alloc_node(root_vnode->mount, dir, name, VNODE_DIR, 1,
                                     child_cap);
             if (next == (void *)0 || tmpfs_add_child(dir, next) < 0) {
