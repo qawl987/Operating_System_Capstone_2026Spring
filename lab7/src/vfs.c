@@ -34,6 +34,7 @@ struct vnode *vfs_root(void) {
 }
 
 static struct vnode *follow_mount(struct vnode *node) {
+    // If current node have many mount point, enter the deepest
     while (node != (void *)0 && node->mounted != (void *)0) {
         node = node->mounted->root;
     }
@@ -41,11 +42,14 @@ static struct vnode *follow_mount(struct vnode *node) {
 }
 
 static struct vnode *parent_of(struct vnode *root, struct vnode *node) {
+    // node == /
     if (node == (void *)0 || node == root || node == root_mount.root) {
         return node;
     }
+    // node == mount root
     if (node->mount != (void *)0 && node == node->mount->root &&
         node->mount->mountpoint != (void *)0) {
+        // node == / -> return itself, node == /dev -> return /
         return node->mount->mountpoint->parent == (void *)0
                    ? node->mount->mountpoint
                    : node->mount->mountpoint->parent;
@@ -53,19 +57,27 @@ static struct vnode *parent_of(struct vnode *root, struct vnode *node) {
     if (node->parent == (void *)0) {
         return node;
     }
+    // node = /a/b -> return a
     return node->parent;
 }
 
+// p = "/a/b" -> p="/b", name = a
 int vfs_next_path_component(const char **pp, char *name) {
     const char *p = *pp;
     int len = 0;
+
+    // Skip leading '/' characters.
     while (*p == '/') {
         p++;
     }
+
+    // No more path components.
     if (*p == '\0') {
         *pp = p;
         return 0;
     }
+
+    // Copy the next path component until '/' or end of string.
     while (*p != '\0' && *p != '/') {
         if (len >= VFS_MAX_NAME) {
             return -1;
@@ -95,6 +107,7 @@ int vfs_lookup_at(struct vnode *root, struct vnode *cwd, const char *pathname,
         if (ret < 0) {
             return -1;
         }
+        // end of path
         if (ret == 0) {
             *target = follow_mount(cur);
             return 0;
@@ -106,7 +119,10 @@ int vfs_lookup_at(struct vnode *root, struct vnode *cwd, const char *pathname,
             cur = parent_of(root, cur);
             continue;
         }
+        // if cur is another mount point, dive into, ex: /dev
+        // cur = tmpfs /dev, -> devfs /
         cur = follow_mount(cur);
+        // only dir can keep lookup, /a.txt/b invalid
         if (cur->type != VNODE_DIR || cur->v_ops == (void *)0 ||
             cur->v_ops->lookup(cur, &cur, name) < 0) {
             return -1;
@@ -138,20 +154,25 @@ static int lookup_parent(struct vnode *root, struct vnode *cwd,
             return -1;
         }
         if (ret == 0) {
+            // ex: /
             if (!saw) {
                 return -1;
             }
+            // return dir ex: /a/b/
             *parent = follow_mount(cur);
             return 0;
         }
         saw = 1;
         const char *save = p;
         char probe[VFS_MAX_NAME + 1];
+        // peek next token
         int has_next = vfs_next_path_component(&save, probe);
         if (has_next < 0) {
             return -1;
         }
+        // reach the end
         if (has_next == 0) {
+            // ex: /a/., a is not the parent
             if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
                 return -1;
             }
@@ -166,6 +187,7 @@ static int lookup_parent(struct vnode *root, struct vnode *cwd,
             cur = parent_of(root, cur);
             continue;
         }
+        // enter mount if have
         cur = follow_mount(cur);
         if (cur->type != VNODE_DIR || cur->v_ops == (void *)0 ||
             cur->v_ops->lookup(cur, &cur, name) < 0) {
@@ -189,15 +211,18 @@ int vfs_open_at(struct vnode *root, struct vnode *cwd, const char *pathname,
         return -1;
     }
     struct vnode *node = (void *)0;
+    // check if file exist
     if (vfs_lookup_at(root, cwd, pathname, &node) < 0) {
         if ((flags & VFS_O_CREAT) == 0) {
             return -1;
         }
+        // block non-exist O_CREAT /a/b/
         if (has_trailing_slash(pathname)) {
             return -1;
         }
         char name[VFS_MAX_NAME + 1];
         struct vnode *parent = (void *)0;
+        // /a/b.txt -> get /a, b.txt
         if (lookup_parent(root, cwd, pathname, &parent, name) < 0 ||
             parent->v_ops == (void *)0 ||
             parent->v_ops->create(parent, &node, name) < 0) {
@@ -210,6 +235,7 @@ int vfs_open_at(struct vnode *root, struct vnode *cwd, const char *pathname,
     }
     int ret = node->f_ops->open(node, target);
     if (ret == 0) {
+        // save flag but not used
         (*target)->flags = flags;
     }
     return ret;
@@ -234,9 +260,11 @@ int vfs_close(struct file *file) {
     if (file->refcnt > 0) {
         return 0;
     }
+    // If no fork process shard file, clean it
     if (file->f_ops != (void *)0 && file->f_ops->close != (void *)0) {
         return file->f_ops->close(file);
     }
+    // fallback
     free(file);
     return 0;
 }
@@ -277,6 +305,7 @@ int vfs_mkdir_at(struct vnode *root, struct vnode *cwd, const char *pathname) {
     char name[VFS_MAX_NAME + 1];
     struct vnode *parent = (void *)0;
     struct vnode *node = (void *)0;
+    // find parent, let parent create child dir
     if (lookup_parent(root, cwd, pathname, &parent, name) < 0 ||
         parent->v_ops == (void *)0 || parent->v_ops->mkdir == (void *)0) {
         return -1;
@@ -291,7 +320,9 @@ int vfs_mkdir(const char *pathname) {
 int vfs_mount_at(struct vnode *root, struct vnode *cwd, const char *target,
                  const char *filesystem) {
     struct vnode *mp = (void *)0;
+    // get file system
     struct filesystem *fs = find_filesystem(filesystem);
+    // get mount point vnode requested outside 
     if (fs == (void *)0 || fs->setup_mount == (void *)0 ||
         vfs_lookup_at(root, cwd, target, &mp) < 0 || mp->type != VNODE_DIR ||
         mp->mounted != (void *)0) {
@@ -318,6 +349,7 @@ int vfs_mount(const char *target, const char *filesystem) {
 
 int vfs_chdir(struct thread *task, const char *path) {
     struct vnode *node = (void *)0;
+    // if path is directory, change to it
     if (task == (void *)0 ||
         vfs_lookup_at(task->fs_root, task->cwd, path, &node) < 0 ||
         node->type != VNODE_DIR) {
@@ -336,6 +368,7 @@ int vfs_thread_init(struct thread *task) {
     for (int i = 0; i < VFS_MAX_FD; i++) {
         task->files[i] = (void *)0;
     }
+    // setup stdin/stdout/stderr to /dev/uart
     for (int i = 0; i < 3; i++) {
         if (vfs_open_at(task->fs_root, task->cwd, "/dev/uart", 0,
                         &task->files[i]) < 0) {
@@ -366,6 +399,7 @@ int vfs_init(unsigned long initrd_start, unsigned long initrd_end) {
     }
 
     struct filesystem *fs = find_filesystem("tmpfs");
+    // root mount, root_mount.root = tmpfs vnode
     if (fs == (void *)0 || fs->setup_mount(fs, &root_mount) < 0) {
         return -1;
     }

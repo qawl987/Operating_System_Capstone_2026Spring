@@ -39,7 +39,9 @@ struct vnode_operations {
 };
 
 struct vnode {
+    // filesystem mount instance
     struct mount *mount;
+    // Only mount point vnode would contain mount, otherwise NULL
     struct mount *mounted;
     struct vnode *parent;
     struct vnode_operations *v_ops;

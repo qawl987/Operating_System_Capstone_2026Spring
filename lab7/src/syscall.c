@@ -51,21 +51,23 @@ static int user_page_ptr(const void *user, int write, void **kernel,
                          size_t *avail) {
     struct thread *cur = get_current();
     unsigned long va = (unsigned long)user;
+    // no user page table, over user space
     if (cur == (void *)0 || cur->pgd == (void *)0 || user == (void *)0 ||
         va >= USER_STACK_TOP) {
         return -1;
     }
-
+    // get last level pte
     unsigned long *pte = vm_get_pte(cur->pgd, va);
     if (pte == (void *)0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
         (write && (*pte & PTE_W) == 0) ||
         (!write && (*pte & PTE_R) == 0)) {
+        // try to fix lazy mmap
         if (process_handle_page_fault(va, write ? 15 : 13) < 0) {
             return -1;
         }
         pte = vm_get_pte(cur->pgd, va);
     }
-
+    // check again after handle page fault
     if (pte == (void *)0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
         (write && (*pte & PTE_W) == 0) ||
         (!write && (*pte & PTE_R) == 0)) {
@@ -73,8 +75,11 @@ static int user_page_ptr(const void *user, int write, void **kernel,
     }
 
     unsigned long off = va & (VM_PAGE_SIZE - 1);
+    // combine physical page address and offset to get pa
     unsigned long pa = ((*pte >> 10) << 12) + off;
+    // translate pa to high addres(kernel address)
     *kernel = (void *)phys_to_virt(pa);
+    // count how many bytes can read remain in this page
     *avail = VM_PAGE_SIZE - off;
     if (*avail > USER_STACK_TOP - va) {
         *avail = USER_STACK_TOP - va;
@@ -117,12 +122,14 @@ static int copy_from_user(void *dst, const void *src, size_t len) {
     while (done < len) {
         void *kernel = (void *)0;
         size_t avail = 0;
+        // translate user address to kernel address
         if (user_page_ptr((const char *)src + done, 0, &kernel, &avail) < 0) {
             return -1;
         }
         if (avail > len - done) {
             avail = len - done;
         }
+        // copy string inside kernel VA
         memcpy((char *)dst + done, kernel, avail);
         done += avail;
     }
@@ -142,6 +149,7 @@ static int copy_to_user(void *dst, const void *src, size_t len) {
     while (done < len) {
         void *kernel = (void *)0;
         size_t avail = 0;
+        // kernel side user buffer address
         if (user_page_ptr((char *)dst + done, 1, &kernel, &avail) < 0) {
             return -1;
         }
@@ -238,6 +246,7 @@ static long sys_open(const char *path, int flags) {
         vfs_open_at(cur->fs_root, cur->cwd, kpath, flags, &file) < 0) {
         return -1;
     }
+    // find first not use fd index
     int fd = fd_alloc(cur, file);
     if (fd < 0) {
         vfs_close(file);
@@ -275,9 +284,11 @@ static long sys_read(int fd, void *buf, unsigned long count) {
             n = sizeof(tmp);
         }
         long ret = vfs_read(file, tmp, n);
+        // fail, return part of len
         if (ret < 0) {
             return done == 0 ? ret : (long)done;
         }
+        // no more to read
         if (ret == 0) {
             break;
         }
@@ -285,6 +296,7 @@ static long sys_read(int fd, void *buf, unsigned long count) {
             return done == 0 ? -1 : (long)done;
         }
         done += (unsigned long)ret;
+        // no more file can read
         if ((size_t)ret < n) {
             break;
         }
