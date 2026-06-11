@@ -158,6 +158,7 @@ long framebuffer_write(unsigned long offset, const void *buf,
     if (n > count) {
         n = count;
     }
+    // access from kernel high address
     void *dst = (void *)(phys_to_virt(FRAMEBUFFER_BASE) + offset);
     memcpy(dst, buf, n);
     flush_dcache(dst, n);

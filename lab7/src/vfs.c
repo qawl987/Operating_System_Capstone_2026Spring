@@ -46,7 +46,7 @@ static struct vnode *parent_of(struct vnode *root, struct vnode *node) {
     if (node == (void *)0 || node == root || node == root_mount.root) {
         return node;
     }
-    // node == mount root
+    // node == mount root, mount->mountpoint == tmpfs /dev
     if (node->mount != (void *)0 && node == node->mount->root &&
         node->mount->mountpoint != (void *)0) {
         // node == / -> return itself, node == /dev -> return /
