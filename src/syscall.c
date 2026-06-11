@@ -149,7 +149,7 @@ static int copy_to_user(void *dst, const void *src, size_t len) {
     while (done < len) {
         void *kernel = (void *)0;
         size_t avail = 0;
-        // kernel side user buffer address
+        // kernel = user buffer address but in high address
         if (user_page_ptr((char *)dst + done, 1, &kernel, &avail) < 0) {
             return -1;
         }

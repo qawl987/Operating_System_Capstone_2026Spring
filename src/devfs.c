@@ -55,6 +55,7 @@ static int uart_open(struct vnode *file_node, struct file **target) {
 }
 
 static int uart_read_file(struct file *file, void *buf, size_t len) {
+    // not used but unify interface
     (void)file;
     if (len == 0) {
         return 0;
@@ -245,6 +246,7 @@ static int devfs_mount(struct filesystem *fs, struct mount *mnt) {
     }
     memset(dev, 0, sizeof(*dev));
     dev->root.vnode.internal = dev;
+    // put different file ops to corresponding node
     devfs_init_node(mnt, &dev->root, &dev->root, "", VNODE_DIR, &devfs_dir_ops);
     devfs_init_node(mnt, &dev->nodes[0], &dev->root, "uart", VNODE_FILE,
                     &uart_file_ops);

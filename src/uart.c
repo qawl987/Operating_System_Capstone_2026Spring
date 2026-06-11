@@ -143,9 +143,11 @@ int uart_try_getc(char *out) {
     if (out == (void *)0) {
         return -1;
     }
+    // have data now
     if ((*uart_lsr() & LSR_DR) != 0) {
         uart_handle_irq();
     }
+    // close irq when reading
     unsigned long irq_state = irq_save();
     if (rx_r == rx_w) {
         irq_restore(irq_state);
